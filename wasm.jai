@@ -1,34 +1,43 @@
-/*  SDG                          Kingdom Core: WASM                               JJ */
+/* SDG                           Kingdom Core: WASM                               JJ */
 
-wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok:bool, msg:string {
+wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 	stack : [..] Wasm_Stack_Entry; // @Incomplete reserve max_stack_size
 	entries : [..] Type;
 	frames : [..] Wasm_Stack_Frame;
-	labels : [..] []Wasm_Label;
+	labels : [..] Wasm_Label;
 	trap: bool;
+	msg: string;
 
 	current_function := func_idx;
 
 	defer for frames free(it.locals_storage);
 
 	while main_f := !trap {
-		statement := module.functions[current_function];
+		function := module.functions[current_function];
+		statement := function.statement;
 
 		{ /* new stack frame for function call */
 			new_frame : Wasm_Stack_Frame;
 			{ /* init locals */
-				array_resize(*new_frame.locals, statement.locals.count);
-				new_frame.locals.count = statement.locals.count;
-				new_frame.locals_storage = alloc(statement.locals_size);
-				for statement.locals {
-					if it_index == 0 continue;
-					new_frame.locals[it_index] = new_frame.locals[it_index - 1] + size_of(it);
+				// @Incomplete(caleb)
+				// This fails to pass type checking because size_of is compile_time only
+				// best bet is probably to instead use the Any type and the Type_Info struct
+				// and go from there.
+				array_resize(*new_frame.locals, function.locals.count);
+				new_frame.locals.count = function.locals.count;
+				new_frame.locals_storage = alloc(function.locals_size);
+				for function.locals {
+					local_ptr : *void;
+					if it_index == 0  local_ptr = new_frame.locals_storage;
+					else local_ptr = new_frame.locals[it_index - 1] + it.runtime_size;
+					array_add(*new_frame.locals, local_ptr);
 				}
 			}
 			new_frame.stack_length = stack.count;
-			new_frame.statement = statement;
-			array_add(*new_frame.locals, new_frame);
-		}
+			new_frame.return_point = statement;
+			array_add(*frames, new_frame);
+		} // defer cleanup
+		// @Incomplete: cleanup stack frame in return or otherwise defer to after statement_f loop
 
 		op_index := 0;
 		while stmnt_f := op_index < statement.count {
@@ -36,7 +45,8 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok:bool, msg:string {
 			defer if !jumped op_index += 1;
 			
 			op := statement[op_index];
-			if #complete op.instruction == {
+			// if #complete op.instruction == {
+			if op.instruction == {
 
 				/* Control Flow Instructions */
 				case .unreachable;
@@ -46,23 +56,26 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok:bool, msg:string {
 				case .nop;
 					continue;
 				case .block;
-					array_add(*labels, .{op_index, stack.count});
+					array_add(*labels, .{xx op_index, xx stack.count});
 				case .loop;
-					array_add(*labels, .{op_index, stack.count});
+					array_add(*labels, .{xx op_index, xx stack.count});
 				case .if_;
 					assert(stack.count != 0);
-					operand := pop(stack)._s32; //pop_stack(*stack, s32); 
+					operand := pop(*stack)._s32; //pop_stack(*stack, s32); 
 					
 					if !operand {
 						jumped = true;
 						op_index = op.else_; // I THINK this is correct.
 						continue; // else pushes the label
 					}
-					array_add(*labels, .{op_index, stack.count});
+					array_add(*labels, .{xx op_index, xx stack.count});
 				case .else_;
 					// @Incomplete(caleb): This should unwind the stack and check if there
 					// is a return type
-					array_add(*labels, .{op_index, stack.count});
+					// also if we didn't jump here, then we need to account for that
+					
+					// if labels[labels.count -1].else_ == op_index // branch to end
+					array_add(*labels, .{xx op_index, xx stack.count});
 				case .throw;
 					assert(false); // not implemented (wasm 3.0)
 				case .throw_ref;
@@ -75,25 +88,25 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok:bool, msg:string {
 					jumped = true;
 					op_index, stack.count = branch(op.label, labels, statement);
 				case .br_if;
-					operand := pop(stack)._s32; //pop_stack(*stack, s32);
+					operand := pop(*stack)._s32;
 					if operand {
 						jumped = true;
 						op_index, stack.count = branch(op.label, labels, statement);
 					}
 				case .br_table;
-					operand := pop(stack)._u32; //pop_stack(*stack, u32);
+					operand := pop(*stack)._u32;
 					if operand >= op.labels.count {
 						trap = true;
 						msg = "bad branch label vector";
 						break main_f;
-						}
+					}
 					br_label := op.labels[operand];				
 					jumped = true;
 					op_index, stack.count = branch(br_label, labels, statement);
 				case .return_;
 					assert(frames.count > 0);
 					current_frame := frames[frames.count - 1];
-					if current_frame.stack_length != stack.count {
+					if current_frame.stack_length != stack.count { // what if the block does not have a return type?
 						stack[current_frame.stack_length] = stack[stack.count -1];
 						stack.count = current_frame.stack_length + 1;
 					}
@@ -104,7 +117,7 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok:bool, msg:string {
 					current_function = op.func;
 					continue main_f;
 				case .call_indirect;
-					operand := pop(stack)._s32; //pop_stack(*stack, s32);
+					operand := pop(*stack)._s32;
 					if operand >= module.tables.count {
 						trap = true;
 						msg = "bad call indirect index";
@@ -148,12 +161,12 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok:bool, msg:string {
 				case .drop;
 					stack.count -= 1;
 				case .select;
-					operand := pop(stack)._s32; //pop_stack(*stack, s32);
+					operand := pop(*stack)._s32;
 					if operand  stack[stack.count -2] = stack[stack.count -1];
 					stack.count -= 1;
 				case .select_with_type;
 					// @Incomplete(caleb): need some type checking here
-					operand := pop(stack)._s32; //pop_stack(*stack, s32);
+					operand := pop(*stack)._s32;
 					if operand  stack[stack.count -2] = stack[stack.count -1];
 					stack.count -= 1;
 				
@@ -161,8 +174,10 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok:bool, msg:string {
 			}
 		} 
 	}
+	return trap, msg;
 }
 
+/*
 // can we insert this into the above somehow as a macro?
 trap_assert :: (assertion: bool, message: string) {
 	trap = assertion;
@@ -173,104 +188,32 @@ trap_assert :: (assertion: bool, message: string) {
 trap_assert_type :: (type: Type, message: string) {
 	// check top of stack types
 }
-
-/*
-pop_stack :: (stack: *[]u32, type: Type) -> Type {
-	num_words := size_of(type) / 4;
-	defer stack.count -= num_words;
-
-	op_ptr := stack.data + stack.count - num_words;
-	return << cast(elem_type) op_ptr;	
-}
-*/
-
-// actually I don't think we need these at all
-// I'm sure there's a more elegant way to do this, but I don't rightly know it.
-/*
-pop_stack :: (stack: *[]Wasm_Stack_Entry, type: Type) -> Type {
-
-	stack_top := pop(stack);
-	
-	if type == {
-		case u32;        return stack_top._u32;
-		case s32;        return stack_top._s32;
-		case float;      return stack_top._f32;
-		case float32;    return stack_top._f32;
-		case u64;        return stack_top._u64;
-		case int;        return stack_top._s64;
-		case float64;    return stack_top._f64;
-
-		// simd type (v128)
-		case v128;       return stack_top._v128;
-		// case [16]u8;     return stack_op._u8x16;        
-		// case [16]s8;     return stack_op._s8x16;
-		// case [8]u16;     return stack_op._u16x8;
-		// case [8]s16;     return stack_op._s16x8;
-		// case [4]u32;     return stack_op._u32x4;
-		// case [4]s32;     return stack_op._s32x4;
-		// case [4]float32; return stack_op._f32x4;
-		// case [2]u64;     return stack_op._u64x4;
-		// case [2]s64;     return stack_op._s64x4;
-		// case [2]float64; return stack_op._f64x4;
-
-		case; assert(false); // invalid type
-	}
-}
-
-
-push_stack :: (stack: *[]Wasm_Stack_Entry, type: Type, value: Any)  {
-	stack_top : Wasm_Stack_Entry;
-	defer array_add(stack, stack_top);
-
-	if type == {
-		case u32;        stack_top._u32 = value;
-		case s32;        stack_top._s32 = value;
-		case float;      stack_top._f32 = value;
-		case float32;    stack_top._f32 = value;
-		case u64;        stack_top._u64 = value;
-		case int;        stack_top._s64 = value;
-		case float64;    stack_top._f64 = value;
-
-		// simd type (v128)
-		case v128;       stack_top._v128 = value;
-		// case [16]u8;     stack_op._u8x1 = value6;        
-		// case [16]s8;     stack_op._s8x1 = value6;
-		// case [8]u16;     stack_op._u16x = value8;
-		// case [8]s16;     stack_op._s16x = value8;
-		// case [4]u32;     stack_op._u32x = value4;
-		// case [4]s32;     stack_op._s32x = value4;
-		// case [4]float32; stack_op._f32x = value4;
-		// case [2]u64;     stack_op._u64x = value4;
-		// case [2]s64;     stack_op._s64x = value4;
-		// case [2]float64; stack_op._f64x = value4;
-
-		case; assert(false); // invalid type
-	}
-}
 */
 
 branch :: (br_label: u32, labels: []Wasm_Label, statement: []Wasm_Operation) -> op_index: int, stack_length: int {
-	
 	// in order from the end from the labels array back
 	branch_label := labels[labels.count - 1 - br_label];
 	branch_point := statement[branch_label.statement];
 
-	if branch_point.op == {
+	if branch_point.instruction == {
 		case .block;
 			return branch_point.end, branch_label.stack_length;
 		case .if_;
 			return branch_point.end, branch_label.stack_length;
 		case .loop;
-			return branch_index + 1, branch_label.stack_length; // don't want to add the label again
+			return branch_label.statement + 1, branch_label.stack_length; // don't want to add the label again
 		case;
-			print("Bad branch!! to op %", branch_point.op);
+			print("Bad branch!! to op %", branch_point.instruction);
 			assert(false);
 	}
+	return -1, -1; // @Incomplete: not a great solution for traps
 }
 
+/*                                      Parsing                                      */
+Wasm_Parse :: (module_bin: []u8) -> Wasm_Module { return .{}; } // @Incomplete(caleb)
 
 
-/*                               Typedefs and Enums                                  */
+/*                                 Typedefs and Enums                                */
 
 Wasm_Type :: enum u8 #specified {
 	// positive numbers are type indices
@@ -291,7 +234,7 @@ Wasm_Type :: enum u8 #specified {
 	nofunc         :: 0x73;
 	noextern       :: 0x72;
 	none           :: 0x71;
-	func           :: 0x70;
+	func_          :: 0x70;
 	extern         :: 0x6F;
 	any            :: 0x6E;
 	eq             :: 0x6D;
@@ -305,7 +248,7 @@ Wasm_Type :: enum u8 #specified {
 	ref_null       :: 0x63;
 
 	// composite type
-	func           :: 0x60; // func [valtype*] → [valtype*]
+	comp_func      :: 0x60; // func [valtype*] → [valtype*]
 	struct_field   :: 0x5F; // struct fieldtype* 
 	array_index    :: 0x5E; // array fieldtype
 
@@ -914,8 +857,10 @@ Wasm_Operation :: struct {
 	}	
 }
 
+// Wasm_Statement :: []Wasm_Operation
+
 Wasm_Function :: struct {
-	locals: []Type;
+	locals: []*Type_Info;
 	locals_size: int;
 	statement: []Wasm_Operation;
 }
@@ -931,7 +876,7 @@ Wasm_Module :: struct {
 Wasm_Stack_Frame :: struct {
 	locals: [..] *void;
 	locals_storage: *void;
-	return_point: []Wasm_Statement;
+	return_point: []Wasm_Operation;
 	op_index: int;
 	stack_length: int;
 	return_type: Type;
@@ -967,3 +912,7 @@ Wasm_Stack_Entry :: union {
 	_f64: float64;
 	_v128: v128;
 }
+
+/*                                      Imports                                     */
+#import "Basic";
+

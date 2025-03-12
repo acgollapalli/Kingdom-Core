@@ -2,11 +2,10 @@
 
 wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 	stack : [..] Wasm_Stack_Entry; // @Incomplete reserve max_stack_size
-	entries : [..] Type;
-	frames : [..] Wasm_Stack_Frame;
-	labels : [..] Wasm_Label;
-	trap: bool;
-	msg: string;
+	frames : [..] Wasm_Stack_Frame; // @Incomplete reserve max stack frames
+	labels : [..] Wasm_Label; // @incomplete reserve max labels
+	trap: bool; // do we actually need this or can we just return?
+	msg: string; // do we actually need this or can we just return the string?
 
 	current_function := func_idx;
 
@@ -45,7 +44,7 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 			defer if !jumped op_index += 1;
 			
 			op := statement[op_index];
-			// if #complete op.instruction == {
+			//if #complete op.instruction == {
 			if op.instruction == {
 
 				/* Control Flow Instructions */
@@ -99,6 +98,8 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 						trap = true;
 						msg = "bad branch label vector";
 						break main_f;
+					} else {
+						operand = op.default_label;
 					}
 					br_label := op.labels[operand];				
 					jumped = true;
@@ -169,12 +170,377 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 					operand := pop(*stack)._s32;
 					if operand  stack[stack.count -2] = stack[stack.count -1];
 					stack.count -= 1;
-				
+
+				/* Variable Instructions */
+				case .try_table;
+					assert(false); // not implemented(wasm 3.0);
+				case .local_get;
+					assert(false);
+					//local := frames[frames.count -1][op.idx];
+					// @Incomplete: need to figure out locals to continue
+					array_add(*stack, .{ });
+				case .local_set;
+					assert(false); // @Incomplete
+				case .local_tee;
+					assert(false); // @Incomplete
+				case .global_get;
+					assert(false); // @Incomplete
+				case .global_set;
+					assert(false); // @Incomplete
+
+				/* Table Instructions (get and set) */
+				case .table_get;
+					assert(false); // @Incomplete
+				case .table_set;
+					assert(false); // @Incomplete
+
+				/* Memory Instructions */
+				case .i32_load;
+					val, ok := load(s32, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; } // @Todo(caleb): write a macro so this isn't so cluttered
+					array_add(*stack, .{_s32 = val});
+				case .i64_load;
+					val, ok := load(s64, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s64 = val});
+				case .f32_load;
+					val, ok := load(float32, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_f32 = val});
+				case .f64_load;
+					val, ok := load(float64, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_f64 = val});
+				case .i32_load8_s;
+					val, ok := load(s8, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s32 = cast(s32) val});
+				case .i32_load8_u;
+					val, ok := load(u8, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s32 = cast(s32) val});
+				case .i32_load16_s;
+					val, ok := load(s16, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s32 = cast(s32) val});
+				case .i32_load16_u;
+					val, ok := load(u16, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s32 = cast(s32) val});
+				case .i64_load8_s;
+					val, ok := load(s8, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s64 = cast(s64) val});
+				case .i64_load8_u;
+					val, ok := load(u8, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s64 = cast(s64) val});
+				case .i64_load16_s;
+					val, ok := load(s16, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s64 = cast(s64) val});
+				case .i64_load16_u;
+					val, ok := load(u16, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s64 = cast(s64) val});
+				case .i64_load32_s;
+					val, ok := load(s32, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s64 = cast(s64) val});
+				case .i64_load32_u;
+					val, ok := load(u32, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					array_add(*stack, .{_s64 = cast(s64) val});
+				case .i32_store;
+					val := pop(*stack)._s32;
+					ok := store(s32, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .i64_store;
+					val := pop(*stack)._s64;
+					ok := store(s64, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .f32_store;
+					val := pop(*stack)._f32;
+					ok := store(float32, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .f64_store;
+					val := pop(*stack)._f64;
+					ok := store(float64, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .i32_store8;
+					val := pop(*stack)._s32;
+					ok := store(s8, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .i32_store16;
+					val := pop(*stack)._s32;
+					ok := store(s16, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .i64_store8;
+					val := pop(*stack)._s64;
+					ok := store(s8, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .i64_store16;
+					val := pop(*stack)._s64;
+					ok := store(s16, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .i64_store32;
+					val := pop(*stack)._s64;
+					ok := store(s32, val, pop(*stack)._u64, op.offset, op.align, module.memory);
+					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+				case .memory_size;
+					array_add(*stack, .{ _s32 = cast (s32) (module.memory.count / 65_536)});
+				case .memory_grow;
+					// @Incomplete Need some kind of mutex here
+					delta := pop(*stack)._s32;
+					new_size := module.memory.count + delta * 65_536;
+					array_resize(*module.memory, new_size); // need to add allocator!!!
+
+				/* numeric instructions */
+				case .i32_const; // maybe fallthrough here?
+					array_add(*stack, op.const);
+				case .i64_const;
+					array_add(*stack, op.const);
+				case .f32_const;
+					array_add(*stack, op.const);
+				case .f64_const;
+					array_add(*stack, op.const);
+				case .i32_eqz; // @Incomplete: This is one of those areas where we should trap or validate before hand
+					stack[stack.count - 1]._s32 = cast (s32) (0 == stack[stack.count - 1]._s32);
+				case .i32_eq;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s32 == stack[stack.count - 1]._s32);
+					stack.count -= 1;
+				case .i32_ne;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s32 != stack[stack.count - 1]._s32);
+					stack.count -= 1;
+				case .i32_lt_s;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s32 < stack[stack.count - 1]._s32);
+					stack.count -= 1;
+				case .i32_lt_u;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u32 < stack[stack.count - 1]._u32);
+					stack.count -= 1;
+				case .i32_gt_s;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s32 > stack[stack.count - 1]._s32);
+					stack.count -= 1;
+				case .i32_gt_u;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u32 > stack[stack.count - 1]._u32);
+					stack.count -= 1;
+				case .i32_le_s;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s32 <= stack[stack.count - 1]._s32);
+					stack.count -= 1;
+				case .i32_le_u;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u32 <= stack[stack.count - 1]._u32);
+					stack.count -= 1;
+				case .i32_ge_s;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s32 >= stack[stack.count - 1]._s32);
+					stack.count -= 1;
+				case .i32_ge_u;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u32 >= stack[stack.count - 1]._u32);
+					stack.count -= 1;
+				case .i64_eqz; // @Incomplete: This is one of those areas where we should trap or validate before hand
+					stack[stack.count - 1]._s32 = cast (s32) (0 == stack[stack.count - 1]._s64);
+				case .i64_eq;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s64 == stack[stack.count - 1]._s64);
+					stack.count -= 1;
+				case .i64_ne;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s64 != stack[stack.count - 1]._s64);
+					stack.count -= 1;
+				case .i64_lt_s;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s64 < stack[stack.count - 1]._s64);
+					stack.count -= 1;
+				case .i64_lt_u;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u64 < stack[stack.count - 1]._u64);
+					stack.count -= 1;
+				case .i64_gt_s;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s64 > stack[stack.count - 1]._s64);
+					stack.count -= 1;
+				case .i64_gt_u;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u64 > stack[stack.count - 1]._u64);
+					stack.count -= 1;
+				case .i64_le_s;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s64 <= stack[stack.count - 1]._s64);
+					stack.count -= 1;
+				case .i64_le_u;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u64 <= stack[stack.count - 1]._u64);
+					stack.count -= 1;
+				case .i64_ge_s;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s64 >= stack[stack.count - 1]._s64);
+					stack.count -= 1;
+				case .i64_ge_u;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u64 >= stack[stack.count - 1]._u64);
+					stack.count -= 1;				
+				case .f32_eq;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f32 == stack[stack.count - 1]._f32);
+					stack.count -= 1;
+				case .f32_ne;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f32 != stack[stack.count - 1]._f32);
+					stack.count -= 1;
+				case .f32_lt;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f32 < stack[stack.count - 1]._f32);
+					stack.count -= 1;
+				case .f32_gt;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f32 > stack[stack.count - 1]._f32);
+					stack.count -= 1;
+				case .f32_le;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f32 <= stack[stack.count - 1]._f32);
+					stack.count -= 1;
+				case .f32_ge;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f32 >= stack[stack.count - 1]._f32);
+					stack.count -= 1;
+				case .f64_eq;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f64 == stack[stack.count - 1]._f64);
+					stack.count -= 1;
+				case .f64_ne;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f64 != stack[stack.count - 1]._f64);
+					stack.count -= 1;
+				case .f64_lt;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f64 < stack[stack.count - 1]._f64);
+					stack.count -= 1;
+				case .f64_gt;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f64 > stack[stack.count - 1]._f64);
+					stack.count -= 1;
+				case .f64_le;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f64 <= stack[stack.count - 1]._f64);
+					stack.count -= 1;
+				case .f64_ge;
+					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._f64 >= stack[stack.count - 1]._f64);
+					stack.count -= 1;
+				case .i32_ctz;
+					// lifted from Basic with arm added
+					x := stack[stack.count -1]._u32; 
+					n: u8 = ---;
+				    #if CPU == .X64 {
+				        #asm {
+				            tzcnt n, x;
+				        }
+					} else #if CPU == .ARM64 {
+						assert(false); // not implemented
+						// #asm {
+						// 	rbit x, x;
+						// 	clz n, x;
+						// }
+					}
+					stack[stack.count -1]._s32 = cast (s32) n;
+				case .i32_clz;
+					x := stack[stack.count -1]._s32; 
+					n: u8 = ---;
+				    #if CPU == .X64 {
+				        #asm {
+				            lzcnt n, x;
+				        }
+					} else #if CPU == .ARM64 {
+						assert(false); // not implemented yet
+						// #asm {
+						// 	clz n, x;
+						// }
+					}
+					stack[stack.count -1]._s32 = cast (s32) n;
+				case .i32_popcnt;
+					x := stack[stack.count -1]._s32;
+					n: u8 = ---;
+					#if CPU == .X64 {
+				        #asm {
+				            popcnt n, x;
+				        }
+					} else #if CPU == .ARM64 {
+						// we may actually just be better off without this inline assembly
+						// vec4 :=  [4]s32.[x, 0, 0, 0];
+						// v : v128 = xx vec4;
+						// nv : v128 = ---;
+						assert(false); // not implemented yet
+						// #asm {
+						// 	cnt nv, v;
+						// 	addv n, nv;
+						// }
+					}
+					stack[stack.count -1]._s32 = cast (s32) n;
+
+					// @Incomplete: need to trap on overflow, divide by zero etc.
+				case .i32_add;
+					stack[stack.count -2]._s32 += stack[stack.count -1]._s32;
+					stack.count -= 1;
+				case .i32_sub;
+					stack[stack.count -2]._s32 -= stack[stack.count -1]._s32;
+					stack.count -= 1;
+				case .i32_mul;
+					stack[stack.count -2]._s32 *= stack[stack.count -1]._s32;
+					stack.count -= 1;
+				case .i32_div_s;
+					stack[stack.count -2]._s32 /= stack[stack.count -1]._s32;
+					stack.count -= 1;
+				case .i32_div_u;
+					// @Incomplete, this doesn't seem right.
+					stack[stack.count -2]._u32 /= stack[stack.count -1]._u32;
+					stack.count -= 1;
+				case .i32_rem_s;
+					// @Incomplete: this doesn't seem right to me...
+					quotient := stack[stack.count -2]._s32 / stack[stack.count -1]._s32;
+					remainder := stack[stack.count -1]._s32 - (quotient * stack[stack.count -2]._s32);
+					stack[stack.count - 2]._s32 = remainder;
+					stack.count -= 1;
+				case .i32_rem_u;
+					stack[stack.count -2]._s32 %= stack[stack.count -1]._s32;
+					stack.count -= 1;
+				case .i32_and;
+					stack[stack.count -2]._s32 &= stack[stack.count -1]._s32;
+					stack.count -=1;
+				case .i32_or;
+					stack[stack.count -2]._s32 |= stack[stack.count -1]._s32;
+					stack.count -=1;
+				case .i32_xor;
+					stack[stack.count -2]._s32 ^= stack[stack.count -1]._s32;
+					stack.count -= 1;
+				case .i32_shl;
+					stack[stack.count - 2]._u32 <<= stack[stack.count -1]._u32;
+					stack.count -= 1;
+				case .i32_shr_s;
+					neg := stack[stack.count - 2]._s32 < 0;
+					if neg  stack[stack.count - 2]._s32 *= -1;
 					
+					stack[stack.count - 2]._u32 >>= stack[stack.count -1]._u32;
+					if neg  stack[stack.count - 2]._s32 *= -1;
+					stack.count -= 1;
+				case .i32_shr_u;
+					stack[stack.count - 2]._u32 >>= stack[stack.count -1]._u32;
+					stack.count -= 1;
+				case .i32_rotl;
+					stack[stack.count - 2]._u32 <<<= stack[stack.count -1]._u32;
+					stack.count -= 1;
+				case .i32_rotr;
+					stack[stack.count - 2]._u32 >>>= stack[stack.count -1]._u32;
+					stack.count -= 1;
+				// 64 bit numerics go here.
+
+
+					
+				case .f32_abs;
+					stack[stack.count -1]._f32 = abs(stack[stack.count -1]._f32);
+				case .f32_neg;
+
+					
+				
 			}
 		} 
 	}
 	return trap, msg;
+}
+
+// @Incomplete I guarantee that some of the annoyances here can be sorted out with some kind of
+// allocator under the hood
+load :: ($type: Type, local_addr: u64, offset: u64, alignment: u32, memory: []u8) -> type, bool {
+	addr := local_addr + offset;
+	alignment_mask := (~cast(u64)0) << alignment; // I THINK this is correct
+	addr &= alignment_mask;
+	if addr + size_of(type) >= cast(u64)memory.count return 0, false;
+	else return << cast (*type) (memory.data + addr), true; // @Incomplete: we want the REAL pointer to be aligned that way as well!
+}
+
+store :: ($type: Type, value: $T, local_addr: u64, offset: u64, alignment: u32, memory: []u8) -> bool {
+	addr := local_addr + offset;
+	alignment_mask := (~cast(u64)0) << alignment; // I THINK this is correct
+	addr &= alignment_mask;
+	if addr + size_of(type) >= cast(u64)memory.count return false;
+	else << cast (*type) (memory.data + addr) = cast,no_check (type) value; 
+	return true;
 }
 
 /*
@@ -293,7 +659,7 @@ Wasm_Instruction :: enum u8 #specified {
 	global_set           :: 0x24; // [𝑡] → [] 
 	table_get            :: 0x25; // [i32] → [𝑡] 
 	table_set            :: 0x26; // [i32 𝑡] → [] 
-	i32_load             :: 0x28; // [i32] → d[i32] 
+	i32_load             :: 0x28; // [i32] → [i32] 
 	i64_load             :: 0x29; // [i32] → [i64] 
 	f32_load             :: 0x2A; // [i32] → [f32] 
 	f64_load             :: 0x2B; // [i32] → [f64] 
@@ -848,12 +1214,21 @@ Wasm_Operation :: struct {
 			end: u32;
 		};
 		label: u32; 
-		labels: []u32;
-		func: u32;
 		struct {
+			labels: []u32;
+			default_label: u32;
+		}
+		func: u32;
+		struct { // x, y for call_indirect
 			table: u32;
 			type: u32;
-		}
+		};
+		idx: u32; // immediate index (localidx, globalidx, tableidx)
+		struct { // memarg: { offset: u32 | u64, align: u32 }
+			offset: u64;
+			align: u32;
+		};
+		const: Wasm_Stack_Entry;
 	}	
 }
 
@@ -915,4 +1290,4 @@ Wasm_Stack_Entry :: union {
 
 /*                                      Imports                                     */
 #import "Basic";
-
+#import "Math";

@@ -1,9 +1,9 @@
 /* SDG                           Kingdom Core: WASM                               JJ */
 
-wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
-	stack : [..] Wasm_Stack_Entry; // @Incomplete reserve max_stack_size
-	frames : [..] Wasm_Stack_Frame; // @Incomplete reserve max stack frames
-	labels : [..] Wasm_Label; // @incomplete reserve max labels
+exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
+	stack : [..] Stack_Entry; // @Incomplete reserve max_stack_size
+	frames : [..] Stack_Frame; // @Incomplete reserve max stack frames
+	labels : [..] Label; // @incomplete reserve max labels
 	trap: bool; // do we actually need this or can we just return?
 	msg: string; // do we actually need this or can we just return the string?
 
@@ -16,7 +16,7 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 		statement := function.statement;
 
 		{ /* new stack frame for function call */
-			new_frame : Wasm_Stack_Frame;
+			new_frame : Stack_Frame;
 			{ /* init locals */
 				// @Incomplete(caleb)
 				// This fails to pass type checking because size_of is compile_time only
@@ -118,16 +118,16 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 					current_function = op.func;
 					continue main_f;
 				case .call_indirect;
-					operand := pop(*stack)._s32;
+					operand := pop(*stack)._u32;
 					if operand >= module.tables.count {
 						trap = true;
 						msg = "bad call indirect index";
 						break main_f;
 					}
-					table : *[][]Wasm_Funcref = module.tables[op.table];
+					table : *[][]Funcref = module.tables[op.table];
 					funcrefs := table.*[operand];
 					
-					funcref : Wasm_Funcref;
+					funcref : Funcref;
 					found_funcref: bool;
 					for funcrefs {
 						if it.functype == module.types[op.type] {
@@ -304,7 +304,7 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 					array_add(*stack, op.const);
 				case .f64_const;
 					array_add(*stack, op.const);
-				case .i32_eqz; // @Incomplete: This is one of those areas where we should trap or validate before hand
+				case .i32_eqz; // @incomplete: this is one of those areas where we should trap or validate before hand
 					stack[stack.count - 1]._s32 = cast (s32) (0 == stack[stack.count - 1]._s32);
 				case .i32_eq;
 					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s32 == stack[stack.count - 1]._s32);
@@ -336,7 +336,7 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 				case .i32_ge_u;
 					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._u32 >= stack[stack.count - 1]._u32);
 					stack.count -= 1;
-				case .i64_eqz; // @Incomplete: This is one of those areas where we should trap or validate before hand
+				case .i64_eqz; // @incomplete: this is one of those areas where we should trap or validate before hand
 					stack[stack.count - 1]._s32 = cast (s32) (0 == stack[stack.count - 1]._s64);
 				case .i64_eq;
 					stack[stack.count - 2]._s32 = cast (s32) (stack[stack.count - 2]._s64 == stack[stack.count - 1]._s64);
@@ -468,26 +468,25 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 					stack[stack.count -2]._s32 /= stack[stack.count -1]._s32;
 					stack.count -= 1;
 				case .i32_div_u;
-					// @Incomplete, this doesn't seem right.
+					if stack[stack.count -1]._u32 == 0  { trap = true; msg = "Divide by zero error!"; break main_f; } // maybe we could be more descriptive?
 					stack[stack.count -2]._u32 /= stack[stack.count -1]._u32;
 					stack.count -= 1;
 				case .i32_rem_s;
-					// @Incomplete: this doesn't seem right to me...
 					quotient := stack[stack.count -2]._s32 / stack[stack.count -1]._s32;
-					remainder := stack[stack.count -1]._s32 - (quotient * stack[stack.count -2]._s32);
+					remainder := stack[stack.count -2]._s32 - (quotient * stack[stack.count -1]._s32);
 					stack[stack.count - 2]._s32 = remainder;
 					stack.count -= 1;
 				case .i32_rem_u;
-					stack[stack.count -2]._s32 %= stack[stack.count -1]._s32;
+					stack[stack.count -2]._u32 %= stack[stack.count -1]._u32;
 					stack.count -= 1;
 				case .i32_and;
-					stack[stack.count -2]._s32 &= stack[stack.count -1]._s32;
+					stack[stack.count -2]._u32 &= stack[stack.count -1]._u32;
 					stack.count -=1;
 				case .i32_or;
-					stack[stack.count -2]._s32 |= stack[stack.count -1]._s32;
+					stack[stack.count -2]._u32 |= stack[stack.count -1]._u32;
 					stack.count -=1;
 				case .i32_xor;
-					stack[stack.count -2]._s32 ^= stack[stack.count -1]._s32;
+					stack[stack.count -2]._u32 ^= stack[stack.count -1]._u32;
 					stack.count -= 1;
 				case .i32_shl;
 					stack[stack.count - 2]._u32 <<= stack[stack.count -1]._u32;
@@ -508,15 +507,281 @@ wasm_exec :: (func_idx: u64, module: Wasm_Module) -> ok: bool, msg: string {
 				case .i32_rotr;
 					stack[stack.count - 2]._u32 >>>= stack[stack.count -1]._u32;
 					stack.count -= 1;
-				// 64 bit numerics go here.
-
-
+				case .i64_ctz;
+					// lifted from Basic with arm added
+					x := stack[stack.count -1]._u64; 
+					n: u8 = ---;
+				    #if CPU == .X64 {
+				        #asm {
+				            tzcnt n, x;
+				        }
+					} else #if CPU == .ARM64 {
+						assert(false); // not implemented
+						// #asm {
+						// 	rbit x, x;
+						// 	clz n, x;
+						// }
+					}
+					stack[stack.count -1]._s64 = cast (s64) n;
+				case .i64_clz;
+					x := stack[stack.count -1]._s64; 
+					n: u8 = ---;
+				    #if CPU == .X64 {
+				        #asm {
+				            lzcnt n, x;
+				        }
+					} else #if CPU == .ARM64 {
+						assert(false); // not implemented yet
+						// #asm {
+						// 	clz n, x;
+						// }
+					}
+					stack[stack.count -1]._s64 = cast (s64) n;
+				case .i64_popcnt;
+					x := stack[stack.count -1]._s64;
+					n: u8 = ---;
+					#if CPU == .X64 {
+				        #asm {
+				            popcnt n, x;
+				        }
+					} else #if CPU == .ARM64 {
+						// we may actually just be better off without this inline assembly
+						// vec4 :=  [4]s64.[x, 0, 0, 0];
+						// v : v128 = xx vec4;
+						// nv : v128 = ---;
+						assert(false); // not implemented yet
+						// #asm {
+						// 	cnt nv, v;
+						// 	addv n, nv;
+						// }
+					}
+					stack[stack.count -1]._s64 = cast (s64) n;
+				case .i64_add;
+					stack[stack.count -2]._s64 += stack[stack.count -1]._s64;
+					stack.count -= 1;
+				case .i64_sub;
+					stack[stack.count -2]._s64 -= stack[stack.count -1]._s64;
+					stack.count -= 1;
+				case .i64_mul;
+					stack[stack.count -2]._s64 *= stack[stack.count -1]._s64;
+					stack.count -= 1;
+				case .i64_div_s;
+					stack[stack.count -2]._s64 /= stack[stack.count -1]._s64;
+					stack.count -= 1;
+				case .i64_div_u;
+					if stack[stack.count -1]._u64 == 0  { trap = true; msg = "Divide by zero error!"; break main_f; } // maybe we could be more descriptive?
+					stack[stack.count -2]._u64 /= stack[stack.count -1]._u64;
+					stack.count -= 1;
+				case .i64_rem_s;
+					quotient := stack[stack.count -2]._s64 / stack[stack.count -1]._s64;
+					remainder := stack[stack.count -2]._s64 - (quotient * stack[stack.count -1]._s64);
+					stack[stack.count - 2]._s64 = remainder;
+					stack.count -= 1;
+				case .i64_rem_u;
+					stack[stack.count -2]._u64 %= stack[stack.count -1]._u64;
+					stack.count -= 1;
+				case .i64_and;
+					stack[stack.count -2]._u64 &= stack[stack.count -1]._u64;
+					stack.count -=1;
+				case .i64_or;
+					stack[stack.count -2]._u64 |= stack[stack.count -1]._u64;
+					stack.count -=1;
+				case .i64_xor;
+					stack[stack.count -2]._u64 ^= stack[stack.count -1]._u64;
+					stack.count -= 1;
+				case .i64_shl;
+					stack[stack.count - 2]._u64 <<= stack[stack.count -1]._u64;
+					stack.count -= 1;
+				case .i64_shr_s;
+					neg := stack[stack.count - 2]._s64 < 0;
+					if neg  stack[stack.count - 2]._s64 *= -1;
 					
+					stack[stack.count - 2]._u64 >>= stack[stack.count -1]._u64;
+					if neg  stack[stack.count - 2]._s64 *= -1;
+					stack.count -= 1;
+				case .i64_shr_u;
+					stack[stack.count - 2]._u64 >>= stack[stack.count -1]._u64;
+					stack.count -= 1;
+				case .i64_rotl;
+					stack[stack.count - 2]._u64 <<<= stack[stack.count -1]._u64;
+					stack.count -= 1;
+				case .i64_rotr;
+					stack[stack.count - 2]._u64 >>>= stack[stack.count -1]._u64;
+					stack.count -= 1;
 				case .f32_abs;
 					stack[stack.count -1]._f32 = abs(stack[stack.count -1]._f32);
 				case .f32_neg;
+					stack[stack.count -1]._f32 *= -1;
+				case .f32_ceil;
+					stack[stack.count]._f32 = ceil(stack[stack.count]._f32);
+				case .f32_floor;
+					stack[stack.count]._f32 = floor(stack[stack.count]._f32);
+				case .f32_trunc;
+					//@Incomplete: If there are instructions that do this that would be better
+					if stack[stack.count]._f32 > 0  stack[stack.count]._f32 = floor(stack[stack.count]._f32);
+					else  stack[stack.count]._f32 = ceil(stack[stack.count]._f32);
+				case .f32_nearest;
+					//@Incomplete: If there are instructions that do this that would be better
+					f :=  stack[stack.count]._f32;
+					if abs(ceil(f) - f) > abs(floor(f) -f)  stack[stack.count]._f32 = floor(f);
+					else if abs(ceil(f) - f) < abs(floor(f) -f)  stack[stack.count]._f32 = ceil(f);
+					else if ceil(f).(int) & 0x01  stack[stack.count]._f32 = floor(f);
+					else  stack[stack.count]._f32 = ceil(f);
+				case .f32_sqrt;
+					stack[stack.count]._f32 = sqrt(stack[stack.count]._f32);
+				case .f32_add;
+					stack[stack.count -2]._f32 += stack[stack.count -1]._f32;
+					stack.count -= 1;
+				case .f32_sub;
+					stack[stack.count -2]._f32 -= stack[stack.count -1]._f32;
+					stack.count -= 1;
+				case .f32_mul;
+					stack[stack.count -2]._f32 *= stack[stack.count -1]._f32;
+					stack.count -= 1;
+				case .f32_div;
+					stack[stack.count -2]._f32 /= stack[stack.count -1]._f32;
+					stack.count -= 1;
+				case .f32_min;
+					stack[stack.count -2]._f32 = min(stack[stack.count -1]._f32, stack[stack.count -2]._f32);
+					stack.count -= 1;
+				case .f32_max;
+					stack[stack.count -2]._f32 = max(stack[stack.count -1]._f32, stack[stack.count -2]._f32);
+					stack.count -= 1;
+				case .f32_copysign;
+					//@Incomplete: If there are instructions that do this that would be better
+					if (stack[stack.count - 2]._f32 < 0) != (stack[stack.count - 2]._f32 < 0)  stack[stack.count -2]._f32 *= -1;
+					stack.count -= 1;
+				case .f64_abs;
+					stack[stack.count -1]._f64 = abs(stack[stack.count -1]._f64);
+				case .f64_neg;
+					stack[stack.count -1]._f64 *= -1;
+				case .f64_ceil;
+					stack[stack.count]._f64 = ceil(stack[stack.count]._f64);
+				case .f64_floor;
+					stack[stack.count]._f64 = floor(stack[stack.count]._f64);
+				case .f64_trunc;
+					//@Incomplete: If there are instructions that do this that would be better
+					if stack[stack.count]._f64 > 0  stack[stack.count]._f64 = floor(stack[stack.count]._f64);
+					else  stack[stack.count]._f64 = ceil(stack[stack.count]._f64);
+				case .f64_nearest;
+					//@Incomplete: If there are instructions that do this that would be better
+					f :=  stack[stack.count]._f64;
+					if abs(ceil(f) - f) > abs(floor(f) -f)  stack[stack.count]._f64 = floor(f);
+					else if abs(ceil(f) - f) < abs(floor(f) -f)  stack[stack.count]._f64 = ceil(f);
+					// @Incomplete: There is a chance that the int is not big enough
+					else if ceil(f).(int) & 0x01  stack[stack.count]._f64 = floor(f);
+					else  stack[stack.count]._f64 = ceil(f);
+				case .f64_sqrt;
+					stack[stack.count]._f64 = sqrt(stack[stack.count]._f64);
+				case .f64_add;
+					stack[stack.count -2]._f64 += stack[stack.count -1]._f64;
+					stack.count -= 1;
+				case .f64_sub;
+					stack[stack.count -2]._f64 -= stack[stack.count -1]._f64;
+					stack.count -= 1;
+				case .f64_mul;
+					stack[stack.count -2]._f64 *= stack[stack.count -1]._f64;
+					stack.count -= 1;
+				case .f64_div;
+					stack[stack.count -2]._f64 /= stack[stack.count -1]._f64;
+					stack.count -= 1;
+				case .f64_min;
+					stack[stack.count -2]._f64 = min(stack[stack.count -1]._f64, stack[stack.count -2]._f64);
+					stack.count -= 1;
+				case .f64_max;
+					stack[stack.count -2]._f64 = max(stack[stack.count -1]._f64, stack[stack.count -2]._f64);
+					stack.count -= 1;
+				case .f64_copysign;
+					//@Incomplete: If there are instructions that do this that would be better
+					if (stack[stack.count - 2]._f64 < 0) != (stack[stack.count - 2]._f64 < 0)  stack[stack.count -2]._f64 *= -1;
+					stack.count -= 1;
+				case .i32_wrap_i64;
+					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._s64;
+				case .i32_trunc_f32_s;
+					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._f32;
+				case .i32_trunc_f32_u;
+					stack[stack.count -1]._u32 = cast,no_check (u32) stack[stack.count -1]._f32;
+				case .i32_trunc_f64_s;
+					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._f32;
+				case .i32_trunc_f64_u;
+					stack[stack.count - 1]._u32 = cast,no_check (u32) stack[stack.count -1]._f32; 
+				case .i64_extend_i32_s;
+					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._s32; 
+				case .i64_extend_i32_u;
+					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._u32; 
+				case .i64_trunc_f32_s;
+					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._f32;
+				case .i64_trunc_f32_u;
+					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._f32;
+				case .i64_trunc_f64_s;
+					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._f64;
+				case .i64_trunc_f64_u;
+					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._f64;
+				case .f32_convert_i32_s;
+					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._f32;
+				case .f32_convert_i32_u;
+					stack[stack.count -1]._u32 = cast,no_check (u32) stack[stack.count -1]._f32;
+				case .f32_convert_i64_s;
+					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._f32;
+				case .f32_convert_i64_u;
+					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._f32;
+				case .f32_demote_f64;
+					stack[stack.count -1]._f32 = cast,no_check (float32) stack[stack.count -1]._f64;
+				case .f64_convert_i32_s;
+					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._f64;
+				case .f64_convert_i32_u;
+					stack[stack.count -1]._u32 = cast,no_check (u32) stack[stack.count -1]._f64;
+				case .f64_convert_i64_s;
+					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._f64;
+				case .f64_convert_i64_u;
+					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._f64;
+				case .f64_promote_f32;
+					stack[stack.count -1]._f64 = cast,no_check (float64) stack[stack.count -1]._f32;
+				case .i32_reinterpret_f32;
+					// no-op
+				case .i64_reinterpret_f64;
+					// no-op
+				case .f32_reinterpret_i32;
+					// no-op
+				case .f64_reinterpret_i64;
+					// no-op
+				case .i32_extend8_s;
+					stack[stack.count -1]._s32 = cast(s32) stack[stack.count -1]._s8;
+				case .i32_extend16_s;
+					stack[stack.count -1]._s32 = cast(s32) stack[stack.count -1]._s16;
+				case .i64_extend8_s;
+					stack[stack.count -1]._s64 = cast(s32) stack[stack.count -1]._s8;
+				case .i64_extend16_s;
+					stack[stack.count -1]._s64 = cast(s32) stack[stack.count -1]._s16;
+				case .i64_extend32_s;
+					stack[stack.count -1]._s64 = cast(s32) stack[stack.count -1]._s32;
 
-					
+				/* Reference Instructions */
+				case .ref_null;
+					new_entry : Stack_Entry;
+					array_add(*stack, new_entry);
+				case .ref_is_null;
+					stack[stack.count -1]._s32 = cast(s32) (stack[stack.count -1]._s64 == 0);
+				case .ref_func;
+					// The only thing that should be able to use a funcref is call_indirect
+					// and that expects a u32 in our implementation, so we just push the immediate
+					// to the stack
+					stack[stack.count -1]._u32 = op.func;
+				case .ref_eq;
+					assert(false); // not implemented (Wasm 3.0)
+				case .ref_as_non_null;
+					assert(false); // not implemented (Wasm 3.0)
+				case .br_on_null;
+					assert(false); // not implemented (Wasm 3.0)
+				case .br_on_non_null;
+					assert(false); // not implemented (Wasm 3.0)
+
+				/* Instructions with OpCodes */
+				case .aggregate_op;
+					assert(false); // not implemented (Wasm 3.0)
+				case .table_op;
+				case .vector_op;
+				case .atomic_op;
 				
 			}
 		} 
@@ -556,7 +821,7 @@ trap_assert_type :: (type: Type, message: string) {
 }
 */
 
-branch :: (br_label: u32, labels: []Wasm_Label, statement: []Wasm_Operation) -> op_index: int, stack_length: int {
+branch :: (br_label: u32, labels: []Label, statement: []Operation) -> op_index: int, stack_length: int {
 	// in order from the end from the labels array back
 	branch_label := labels[labels.count - 1 - br_label];
 	branch_point := statement[branch_label.statement];
@@ -576,12 +841,12 @@ branch :: (br_label: u32, labels: []Wasm_Label, statement: []Wasm_Operation) -> 
 }
 
 /*                                      Parsing                                      */
-Wasm_Parse :: (module_bin: []u8) -> Wasm_Module { return .{}; } // @Incomplete(caleb)
+parse :: (module_bin: string) -> Module { return .{}; } // @Incomplete(caleb)
 
 
 /*                                 Typedefs and Enums                                */
 
-Wasm_Type :: enum u8 #specified {
+Reference_Type :: enum u8 #specified {
 	// positive numbers are type indices
 
 	// numeric types
@@ -628,7 +893,7 @@ Wasm_Type :: enum u8 #specified {
 }
 
 
-Wasm_Instruction :: enum u8 #specified {
+Instruction :: enum u8 #specified {
 	unreachable          :: 0x00; // [𝑡* 1] → [𝑡* 2] 
 	nop                  :: 0x01; // [] → [] 
 	block                :: 0x02; // [𝑡* 1] → [𝑡* 2] 
@@ -830,7 +1095,7 @@ Wasm_Instruction :: enum u8 #specified {
 }
 
 
-Wasm_Table_Opcode :: enum u32 #specified {
+Table_Opcode :: enum u32 #specified {
 	i32_trunc_sat_f32_s :: 0x00; // [f32] → [i32] validation execution
 	i32_trunc_sat_f32_u :: 0x01; // [f32] → [i32] validation execution
 	i32_trunc_sat_f64_s :: 0x02; // [f64] → [i32] validation execution
@@ -852,7 +1117,7 @@ Wasm_Table_Opcode :: enum u32 #specified {
 }
 
 
-Wasm_Vector_Opcode :: enum u32 #specified {
+Vector_Opcode :: enum u32 #specified {
 	v128_load                           :: 0x00; // [i32] → [v128] 
 	v128_load8x8_s                      :: 0x01; // [i32] → [v128] 
 	v128_load8x8_u                      :: 0x02; // [i32] → [v128] 
@@ -1114,7 +1379,7 @@ Wasm_Vector_Opcode :: enum u32 #specified {
 }
 
 
-Wasm_Atomic_Opcode :: enum u32 #specified {
+Atomic_Opcode :: enum u32 #specified {
 	notify              :: 0x00; // [i32 i32]→[i32]
 	wait32              :: 0x01; // [i32 i32 i64]→[i32]
 	wait64              :: 0x02; // [i32 i64 i64]→[i32]
@@ -1186,7 +1451,7 @@ Wasm_Atomic_Opcode :: enum u32 #specified {
 
 // The sections in a compiled wasm module
 // Each of these amounts to the first byte
-Wasm_Section_Id :: enum u8 #specified {
+Section_Id :: enum u8 #specified {
     Custom     :: 0;
     Type       :: 1;
     Import     :: 2;
@@ -1202,11 +1467,11 @@ Wasm_Section_Id :: enum u8 #specified {
 	Data_Count :: 12;
 }
 
-Wasm_Function_Type :: struct {};
-Wasm_Import :: struct {};
+Function_Type :: struct {};
+Import :: struct {};
 
-Wasm_Operation :: struct {
-	instruction: Wasm_Instruction;
+Operation :: struct {
+	instruction: Instruction;
 	opcode: u32;
 	using literals: union {
 		struct {
@@ -1228,37 +1493,37 @@ Wasm_Operation :: struct {
 			offset: u64;
 			align: u32;
 		};
-		const: Wasm_Stack_Entry;
+		const: Stack_Entry;
 	}	
 }
 
-// Wasm_Statement :: []Wasm_Operation
+// Statement :: []Operation
 
-Wasm_Function :: struct {
+Function :: struct {
 	locals: []*Type_Info;
 	locals_size: int;
-	statement: []Wasm_Operation;
+	statement: []Operation;
 }
 
-Wasm_Module :: struct {
+Module :: struct {
 	memory: [..] u8;
 	// memory.allocator == page by page allocator
-	functions: []Wasm_Function;
+	functions: []Function;
 	tables: []*void; // tables of various type.
 	types: []Type;
 }
 
-Wasm_Stack_Frame :: struct {
+Stack_Frame :: struct {
 	locals: [..] *void;
 	locals_storage: *void;
-	return_point: []Wasm_Operation;
+	return_point: []Operation;
 	op_index: int;
 	stack_length: int;
 	return_type: Type;
 }
 
 // @Improvement maybe make these u32?
-Wasm_Label :: struct {
+Label :: struct {
 	statement: u32;
 	stack_length: int;
 }
@@ -1269,7 +1534,7 @@ Funcref_Reftype :: enum u32 {
 	Extern;
 }
 
-Wasm_Funcref :: struct {
+Funcref :: struct {
 	reftype: Funcref_Reftype;
 	functype: Type;
 	union {
@@ -1278,16 +1543,48 @@ Wasm_Funcref :: struct {
 	}
 }
 
-Wasm_Stack_Entry :: union {
+Stack_Entry :: union {
+	_u8: u8;
+	_s8: s8;
+	_u16: u16;
+	_s16: s16;
 	_u32: u32;
 	_s32: s32;
 	_f32: float32;
 	_u64: u64;
 	_s64: s64;
 	_f64: float64;
-	_v128: v128;
+	// _v128: v128; // v128 doesn't do anything yet so... we're not gonna worry about it.
+	_v128: union {
+		_2xf64: [2]float64;
+		_2xu64: [2]u64;
+		_2xs64: [2]s64;
+		_4xf32: [4]float32;
+		_4xu32: [4]u32;
+		_4xs32: [4]s32;
+		_8xu16: [8]u16;
+		_8xs16: [8]s16;
+		_16xu8: [16]u8;
+		_16xs8: [16]s8;
+	};
+}
+
+
+
+/* @Note(caleb): This module is meant to be used as a library. But for testing and
+   and ease of compilation, I've added a main function */
+main :: () {
+	args := get_command_line_arguments();
+	if args.count > 1 {
+		module := parse(read_entire_file(args[0]));
+		start : u64;
+		// @Incomplete get start here
+		exec(start, module);
+	}
+	else print("Please specify a wasm binary file to run!\n");
 }
 
 /*                                      Imports                                     */
 #import "Basic";
 #import "Math";
+#import "File";

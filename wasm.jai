@@ -44,14 +44,10 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 			defer if !jumped op_index += 1;
 			
 			op := statement[op_index];
-			//if #complete op.instruction == {
-			if op.instruction == {
-
+			if #complete op.instruction == {
 				/* Control Flow Instructions */
 				case .unreachable;
-					trap = true;
-					msg = "Reached the Unreachable Instruction. You assumed wrong, programmer.";
-					break main_f;
+					Trap("Reached the Unreachable Instruction. You assumed wrong, programmer.");
 				case .nop;
 					continue;
 				case .block;
@@ -94,20 +90,17 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 					}
 				case .br_table;
 					operand := pop(*stack)._u32;
-					if operand >= op.labels.count {
-						trap = true;
-						msg = "bad branch label vector";
-						break main_f;
-					} else {
-						operand = op.default_label;
-					}
+					if operand >= op.labels.count  Trap("Bad branch label vector");
+					else  operand = op.default_label;
+					
 					br_label := op.labels[operand];				
 					jumped = true;
 					op_index, stack.count = branch(br_label, labels, statement);
 				case .return_;
 					assert(frames.count > 0);
 					current_frame := frames[frames.count - 1];
-					if current_frame.stack_length != stack.count { // what if the block does not have a return type?
+					// @Incomplete: What if the block does not have a return type
+					if current_frame.stack_length != stack.count {
 						stack[current_frame.stack_length] = stack[stack.count -1];
 						stack.count = current_frame.stack_length + 1;
 					}
@@ -119,11 +112,8 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 					continue main_f;
 				case .call_indirect;
 					operand := pop(*stack)._u32;
-					if operand >= module.tables.count {
-						trap = true;
-						msg = "bad call indirect index";
-						break main_f;
-					}
+					if operand >= module.tables.count Trap("bad call indirect index");
+
 					table : *[][]Funcref = module.tables[op.table];
 					funcrefs := table.*[operand];
 					
@@ -135,11 +125,7 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 							found_funcref = true;
 						}
 					}
-					if !found_funcref {
-						trap = true;
-						msg = "bad call indirect funcref";
-						break main_f;
-					}
+					if !found_funcref Trap("bad call indirect funcref");
 
 					if funcref.reftype == .Extern {
 						// @Incomplete(caleb): figure out how to get input and output
@@ -197,96 +183,96 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 				/* Memory Instructions */
 				case .i32_load;
 					val, ok := load(s32, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; } // @Todo(caleb): write a macro so this isn't so cluttered
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s32 = val});
 				case .i64_load;
 					val, ok := load(s64, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s64 = val});
 				case .f32_load;
 					val, ok := load(float32, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_f32 = val});
 				case .f64_load;
 					val, ok := load(float64, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_f64 = val});
 				case .i32_load8_s;
 					val, ok := load(s8, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s32 = cast(s32) val});
 				case .i32_load8_u;
 					val, ok := load(u8, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s32 = cast(s32) val});
 				case .i32_load16_s;
 					val, ok := load(s16, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s32 = cast(s32) val});
 				case .i32_load16_u;
 					val, ok := load(u16, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s32 = cast(s32) val});
 				case .i64_load8_s;
 					val, ok := load(s8, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s64 = cast(s64) val});
 				case .i64_load8_u;
 					val, ok := load(u8, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s64 = cast(s64) val});
 				case .i64_load16_s;
 					val, ok := load(s16, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s64 = cast(s64) val});
 				case .i64_load16_u;
 					val, ok := load(u16, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s64 = cast(s64) val});
 				case .i64_load32_s;
 					val, ok := load(s32, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s64 = cast(s64) val});
 				case .i64_load32_u;
 					val, ok := load(u32, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 					array_add(*stack, .{_s64 = cast(s64) val});
 				case .i32_store;
 					val := pop(*stack)._s32;
 					ok := store(s32, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .i64_store;
 					val := pop(*stack)._s64;
 					ok := store(s64, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .f32_store;
 					val := pop(*stack)._f32;
 					ok := store(float32, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .f64_store;
 					val := pop(*stack)._f64;
 					ok := store(float64, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .i32_store8;
 					val := pop(*stack)._s32;
 					ok := store(s8, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .i32_store16;
 					val := pop(*stack)._s32;
 					ok := store(s16, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .i64_store8;
 					val := pop(*stack)._s64;
 					ok := store(s8, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .i64_store16;
 					val := pop(*stack)._s64;
 					ok := store(s16, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .i64_store32;
 					val := pop(*stack)._s64;
 					ok := store(s32, val, pop(*stack)._u64, op.offset, op.align, module.memory);
-					if !ok { trap = true; msg = "Out of bounds memory access!"; break main_f; }
+					if !ok Trap("Out of bounds memory access!");
 				case .memory_size;
 					array_add(*stack, .{ _s32 = cast (s32) (module.memory.count / 65_536)});
 				case .memory_grow;
@@ -465,16 +451,19 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 					stack[stack.count -2]._s32 *= stack[stack.count -1]._s32;
 					stack.count -= 1;
 				case .i32_div_s;
+					if stack[stack.count -1]._s32 == 0  Trap("Divide by zero error!");
 					stack[stack.count -2]._s32 /= stack[stack.count -1]._s32;
 					stack.count -= 1;
 				case .i32_div_u;
-					if stack[stack.count -1]._u32 == 0  { trap = true; msg = "Divide by zero error!"; break main_f; } // maybe we could be more descriptive?
+					if stack[stack.count -1]._u32 == 0  Trap("Divide by zero error!"); // maybe we could be more descriptive?
 					stack[stack.count -2]._u32 /= stack[stack.count -1]._u32;
 					stack.count -= 1;
 				case .i32_rem_s;
-					quotient := stack[stack.count -2]._s32 / stack[stack.count -1]._s32;
-					remainder := stack[stack.count -2]._s32 - (quotient * stack[stack.count -1]._s32);
-					stack[stack.count - 2]._s32 = remainder;
+					if stack[stack.count -1]._s32 != 0 {
+						quotient := stack[stack.count -2]._s32 / stack[stack.count -1]._s32;
+						remainder := stack[stack.count -2]._s32 - (quotient * stack[stack.count -1]._s32);
+						stack[stack.count - 2]._s32 = remainder;
+					}
 					stack.count -= 1;
 				case .i32_rem_u;
 					stack[stack.count -2]._u32 %= stack[stack.count -1]._u32;
@@ -566,16 +555,19 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 					stack[stack.count -2]._s64 *= stack[stack.count -1]._s64;
 					stack.count -= 1;
 				case .i64_div_s;
+					if stack[stack.count -1]._s64 == 0  Trap("Divide by zero error!");
 					stack[stack.count -2]._s64 /= stack[stack.count -1]._s64;
 					stack.count -= 1;
 				case .i64_div_u;
-					if stack[stack.count -1]._u64 == 0  { trap = true; msg = "Divide by zero error!"; break main_f; } // maybe we could be more descriptive?
+					if stack[stack.count -1]._u64 == 0  Trap("Divide by zero error!"); // maybe we could be more descriptive?
 					stack[stack.count -2]._u64 /= stack[stack.count -1]._u64;
 					stack.count -= 1;
 				case .i64_rem_s;
-					quotient := stack[stack.count -2]._s64 / stack[stack.count -1]._s64;
-					remainder := stack[stack.count -2]._s64 - (quotient * stack[stack.count -1]._s64);
-					stack[stack.count - 2]._s64 = remainder;
+					if stack[stack.count -1]._s64 != 0 {
+						quotient := stack[stack.count -2]._s64 / stack[stack.count -1]._s64;
+						remainder := stack[stack.count -2]._s64 - (quotient * stack[stack.count -1]._s64);
+						stack[stack.count - 2]._s64 = remainder;
+					}
 					stack.count -= 1;
 				case .i64_rem_u;
 					stack[stack.count -2]._u64 %= stack[stack.count -1]._u64;
@@ -617,7 +609,6 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 				case .f32_floor;
 					stack[stack.count]._f32 = floor(stack[stack.count]._f32);
 				case .f32_trunc;
-					//@Incomplete: If there are instructions that do this that would be better
 					if stack[stack.count]._f32 > 0  stack[stack.count]._f32 = floor(stack[stack.count]._f32);
 					else  stack[stack.count]._f32 = ceil(stack[stack.count]._f32);
 				case .f32_nearest;
@@ -648,7 +639,6 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 					stack[stack.count -2]._f32 = max(stack[stack.count -1]._f32, stack[stack.count -2]._f32);
 					stack.count -= 1;
 				case .f32_copysign;
-					//@Incomplete: If there are instructions that do this that would be better
 					if (stack[stack.count - 2]._f32 < 0) != (stack[stack.count - 2]._f32 < 0)  stack[stack.count -2]._f32 *= -1;
 					stack.count -= 1;
 				case .f64_abs;
@@ -660,15 +650,12 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 				case .f64_floor;
 					stack[stack.count]._f64 = floor(stack[stack.count]._f64);
 				case .f64_trunc;
-					//@Incomplete: If there are instructions that do this that would be better
 					if stack[stack.count]._f64 > 0  stack[stack.count]._f64 = floor(stack[stack.count]._f64);
 					else  stack[stack.count]._f64 = ceil(stack[stack.count]._f64);
 				case .f64_nearest;
-					//@Incomplete: If there are instructions that do this that would be better
 					f :=  stack[stack.count]._f64;
 					if abs(ceil(f) - f) > abs(floor(f) -f)  stack[stack.count]._f64 = floor(f);
 					else if abs(ceil(f) - f) < abs(floor(f) -f)  stack[stack.count]._f64 = ceil(f);
-					// @Incomplete: There is a chance that the int is not big enough
 					else if ceil(f).(int) & 0x01  stack[stack.count]._f64 = floor(f);
 					else  stack[stack.count]._f64 = ceil(f);
 				case .f64_sqrt;
@@ -695,48 +682,49 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 					//@Incomplete: If there are instructions that do this that would be better
 					if (stack[stack.count - 2]._f64 < 0) != (stack[stack.count - 2]._f64 < 0)  stack[stack.count -2]._f64 *= -1;
 					stack.count -= 1;
-				case .i32_wrap_i64;
-					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._s64;
-				case .i32_trunc_f32_s;
-					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._f32;
+
+				// @Incomplete Some of these may need traps for out of bounds values
+				case .i32_wrap_i64; stack[stack.count -1]._s32 = xx stack[stack.count -1]._s64;
+				case .i32_trunc_f32_s; 
+					stack[stack.count -1]._s32 = xx stack[stack.count -1]._f32;
 				case .i32_trunc_f32_u;
-					stack[stack.count -1]._u32 = cast,no_check (u32) stack[stack.count -1]._f32;
+					stack[stack.count -1]._u32 = xx stack[stack.count -1]._f32;
 				case .i32_trunc_f64_s;
-					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._f32;
+					stack[stack.count -1]._s32 = xx stack[stack.count -1]._f32;
 				case .i32_trunc_f64_u;
-					stack[stack.count - 1]._u32 = cast,no_check (u32) stack[stack.count -1]._f32; 
+					stack[stack.count - 1]._u32 = xx stack[stack.count -1]._f32; 
 				case .i64_extend_i32_s;
-					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._s32; 
+					stack[stack.count -1]._s64 = xx stack[stack.count -1]._s32; 
 				case .i64_extend_i32_u;
-					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._u32; 
+					stack[stack.count -1]._u64 = xx stack[stack.count -1]._u32; 
 				case .i64_trunc_f32_s;
-					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._f32;
+					stack[stack.count -1]._s64 = xx stack[stack.count -1]._f32;
 				case .i64_trunc_f32_u;
-					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._f32;
+					stack[stack.count -1]._u64 = xx stack[stack.count -1]._f32;
 				case .i64_trunc_f64_s;
-					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._f64;
+					stack[stack.count -1]._s64 = xx stack[stack.count -1]._f64;
 				case .i64_trunc_f64_u;
-					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._f64;
+					stack[stack.count -1]._u64 = xx stack[stack.count -1]._f64;
 				case .f32_convert_i32_s;
-					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._f32;
+					stack[stack.count -1]._s32 = xx stack[stack.count -1]._f32;
 				case .f32_convert_i32_u;
-					stack[stack.count -1]._u32 = cast,no_check (u32) stack[stack.count -1]._f32;
+					stack[stack.count -1]._u32 = xx stack[stack.count -1]._f32;
 				case .f32_convert_i64_s;
-					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._f32;
+					stack[stack.count -1]._s64 = xx stack[stack.count -1]._f32;
 				case .f32_convert_i64_u;
-					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._f32;
+					stack[stack.count -1]._u64 = xx stack[stack.count -1]._f32;
 				case .f32_demote_f64;
-					stack[stack.count -1]._f32 = cast,no_check (float32) stack[stack.count -1]._f64;
+					stack[stack.count -1]._f32 = xx stack[stack.count -1]._f64;
 				case .f64_convert_i32_s;
-					stack[stack.count -1]._s32 = cast,no_check (s32) stack[stack.count -1]._f64;
+					stack[stack.count -1]._s32 = xx stack[stack.count -1]._f64;
 				case .f64_convert_i32_u;
-					stack[stack.count -1]._u32 = cast,no_check (u32) stack[stack.count -1]._f64;
+					stack[stack.count -1]._u32 = xx stack[stack.count -1]._f64;
 				case .f64_convert_i64_s;
-					stack[stack.count -1]._s64 = cast,no_check (s64) stack[stack.count -1]._f64;
+					stack[stack.count -1]._s64 = xx stack[stack.count -1]._f64;
 				case .f64_convert_i64_u;
-					stack[stack.count -1]._u64 = cast,no_check (u64) stack[stack.count -1]._f64;
+					stack[stack.count -1]._u64 = xx stack[stack.count -1]._f64;
 				case .f64_promote_f32;
-					stack[stack.count -1]._f64 = cast,no_check (float64) stack[stack.count -1]._f32;
+					stack[stack.count -1]._f64 = xx stack[stack.count -1]._f32;
 				case .i32_reinterpret_f32;
 					// no-op
 				case .i64_reinterpret_f64;
@@ -746,22 +734,22 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 				case .f64_reinterpret_i64;
 					// no-op
 				case .i32_extend8_s;
-					stack[stack.count -1]._s32 = cast(s32) stack[stack.count -1]._s8;
+					stack[stack.count -1]._s32 = xx stack[stack.count -1]._s8;
 				case .i32_extend16_s;
-					stack[stack.count -1]._s32 = cast(s32) stack[stack.count -1]._s16;
+					stack[stack.count -1]._s32 = xx stack[stack.count -1]._s16;
 				case .i64_extend8_s;
-					stack[stack.count -1]._s64 = cast(s32) stack[stack.count -1]._s8;
+					stack[stack.count -1]._s64 = xx stack[stack.count -1]._s8;
 				case .i64_extend16_s;
-					stack[stack.count -1]._s64 = cast(s32) stack[stack.count -1]._s16;
+					stack[stack.count -1]._s64 = xx stack[stack.count -1]._s16;
 				case .i64_extend32_s;
-					stack[stack.count -1]._s64 = cast(s32) stack[stack.count -1]._s32;
+					stack[stack.count -1]._s64 = xx stack[stack.count -1]._s32;
 
 				/* Reference Instructions */
 				case .ref_null;
 					new_entry : Stack_Entry;
 					array_add(*stack, new_entry);
 				case .ref_is_null;
-					stack[stack.count -1]._s32 = cast(s32) (stack[stack.count -1]._s64 == 0);
+					stack[stack.count -1]._s32 = cast (s32) (stack[stack.count -1]._s64 == 0);
 				case .ref_func;
 					// The only thing that should be able to use a funcref is call_indirect
 					// and that expects a u32 in our implementation, so we just push the immediate
@@ -779,7 +767,36 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 				/* Instructions with OpCodes */
 				case .aggregate_op;
 					assert(false); // not implemented (Wasm 3.0)
-				case .table_op;
+				case .table_op; // Looking at these instructions, this name kinda sucks
+					if #complete cast (Table_Opcode) op.opcode == {
+						// The default auto_cast (xx) behavior is to saturate
+						case .i32_trunc_sat_f32_s;
+							stack[stack.count -1]._s32 = xx stack[stack.count -1]._f32;
+						case .i32_trunc_sat_f32_u;
+							stack[stack.count -1]._u32 = xx stack[stack.count -1]._f32;
+						case .i32_trunc_sat_f64_s;
+							stack[stack.count -1]._s32 = xx stack[stack.count -1]._f64;
+						case .i32_trunc_sat_f64_u;
+							stack[stack.count -1]._u32 = xx stack[stack.count -1]._f64;
+						case .i64_trunc_sat_f32_s;
+							stack[stack.count -1]._s64 = xx stack[stack.count -1]._f32;
+						case .i64_trunc_sat_f32_u;
+							stack[stack.count -1]._u64 = xx stack[stack.count -1]._f32;
+						case .i64_trunc_sat_f64_s;
+							stack[stack.count -1]._s64 = xx stack[stack.count -1]._f64;
+						case .i64_trunc_sat_f64_u;
+							stack[stack.count -1]._u64 = xx stack[stack.count -1]._f64;
+						case .memory_init;
+						case .data_drop;
+						case .memory_copy;
+						case .memory_fill;
+						case .table_init;
+						case .elem_drop;
+						case .table_copy;
+						case .table_grow;
+						case .table_size;
+						case .table_fill;
+					}
 				case .vector_op;
 				case .atomic_op;
 				
@@ -808,19 +825,6 @@ store :: ($type: Type, value: $T, local_addr: u64, offset: u64, alignment: u32, 
 	return true;
 }
 
-/*
-// can we insert this into the above somehow as a macro?
-trap_assert :: (assertion: bool, message: string) {
-	trap = assertion;
-	if trap msg = message;
-	if trap break main_f;
-}
-
-trap_assert_type :: (type: Type, message: string) {
-	// check top of stack types
-}
-*/
-
 branch :: (br_label: u32, labels: []Label, statement: []Operation) -> op_index: int, stack_length: int {
 	// in order from the end from the labels array back
 	branch_label := labels[labels.count - 1 - br_label];
@@ -841,9 +845,58 @@ branch :: (br_label: u32, labels: []Label, statement: []Operation) -> op_index: 
 }
 
 /*                                      Parsing                                      */
-parse :: (module_bin: string) -> Module { return .{}; } // @Incomplete(caleb)
+parse :: (module_bin: string) -> Module, bool {
+	magic_number := module_bin;
+	magic_number.count = 4;
+	if magic_number != "\0asm" {
+		print("Magic number at start of module = % and not \"\\0asm\" ", magic_number);
+		return .{}, false;
+	}
 
+	version := magic_number;
+	version.data += 4;
+	print("Wasm version = %", version.([]u8));
 
+	sections := module_bin.([]u8);
+	sections.data += 8;
+	sections.count -= 8;
+
+	module: Module;
+	current_section: Section_Id;
+	new_section := true;
+
+	for sections {
+		if new_section {
+			current_section = xx it;
+			if current_section == .Custom {
+				num_slice := sections;
+				num_slice.data += it_index;
+				num_slice.count -= it_index;
+
+				section_size, num_bytes := read_leb_128_u(num_slice);
+				it_index += section_size + num_bytes; // I don't know if we can do this
+			}
+			continue;
+		}
+	}
+
+		
+	return .{}, true;
+} // @Incomplete(caleb)
+
+read_leb_128_u :: (input: []u8) -> u32, int {
+	out: u32;
+	count : int;
+
+	for input {
+		mask :u32 = it & 0x7f;
+		mask <<= it_index.(u32) * 7;
+		out |= mask;
+		count = it_index;
+		if !(it & 0x80) break;
+	}
+	return out, count;
+}
 /*                                 Typedefs and Enums                                */
 
 Reference_Type :: enum u8 #specified {
@@ -1569,7 +1622,12 @@ Stack_Entry :: union {
 	};
 }
 
-
+/* Macros */
+Trap :: (msg: string) #expand {
+	`trap = true;
+	`msg = msg;
+	break `main_f; 
+}
 
 /* @Note(caleb): This module is meant to be used as a library. But for testing and
    and ease of compilation, I've added a main function */

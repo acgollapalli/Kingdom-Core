@@ -845,10 +845,10 @@ branch :: (br_label: u32, labels: []Label, statement: []Operation) -> op_index: 
 }
 
 /*                                      Parsing                                      */
-parse :: (module_bin: string) -> Module, bool {
+parse :: (module_bin: []u8) -> Module, bool {
 	magic_number := module_bin;
 	magic_number.count = 4;
-	if magic_number != "\0asm" {
+	if magic_number.(string) != "\0asm" {
 		print("Magic number at start of module = % and not \"\\0asm\" ", magic_number);
 		return .{}, false;
 	}
@@ -857,46 +857,147 @@ parse :: (module_bin: string) -> Module, bool {
 	version.data += 4;
 	print("Wasm version = %", version.([]u8));
 
-	sections := module_bin.([]u8);
-	sections.data += 8;
-	sections.count -= 8;
-
 	module: Module;
-	current_section: Section_Id;
-	new_section := true;
+	ok := true;
+	or_return :: () #expand {
+		if !`ok  `return .{}, false;
+	}
 
-	for sections {
-		if new_section {
-			current_section = xx it;
-			if current_section == .Custom {
-				num_slice := sections;
-				num_slice.data += it_index;
-				num_slice.count -= it_index;
+	cursor := 8;
+	while cursor < module_bin.count {
+		section_id :=                 BYTE();
+		section_length :=             LEB128(u32);
 
-				section_size, num_bytes := read_leb_128_u(num_slice);
-				it_index += section_size + num_bytes; // I don't know if we can do this
-			}
-			continue;
+		if #complete section_id.(Section_Id) == {
+			case .Custom;
+				cursor += section_length;
+				continue;
+			case .Type;
+				if module.types return .{}, false;
+				module.types, cursor, ok = read_types(module_bin, cursor);     or_return();
+				continue; 
+			case .Import;
+				imports_length := LEB128(u32);
+				
+			case .Function;
+			case .Table;
+			case .Memory;
+			case .Global;
+			case .Export;
+			case .Start;
+			case .Element;
+			case .Code_;
+			case .Data;
+			case .Data_Count;
 		}
+	
 	}
 
 		
 	return .{}, true;
 } // @Incomplete(caleb)
 
-read_leb_128_u :: (input: []u8) -> u32, int {
-	out: u32;
+read_types :: (module_bin: []u8, current_position: int) -> []Type_, int, bool {
+	cursor := current_position;
+	NOT_IMPLEMENTED :: () #expand {
+		`return .{}, 0 ,false; // WebAssembly 3.0 types
+	}
+	
+	types_length := LEB128(u32);
+	types:= NewArray(types_length, Type_); // @Incomplete: Don't forget to push a context with an arena for all this!
+	while cursor < module_bin.count && types.count < types_length {
+		type_kind := BYTE().(Reference_Type);
+		if type_kind == {
+			// positive numbers are type indices
+
+			// numeric types
+			case .i32;                  #through;         
+			case .i64;                  #through;         
+			case .f32;                  #through;         
+			case .f64;                  #through;         
+			case .v128_;                #through;         
+			// packed types
+			case .i8;                   #through;
+			case .i16;
+				types.count += 1;
+				types[types.count - 1].type = type_kind;
+			// heap types
+			case .noexn;                NOT_IMPLEMENTED();
+			case .nofunc;               NOT_IMPLEMENTED();
+			case .noextern;             NOT_IMPLEMENTED();
+			case .none;                 NOT_IMPLEMENTED();
+			case .func_;
+			
+			case .extern;
+		
+			case .any;                  NOT_IMPLEMENTED();
+			case .eq;                   NOT_IMPLEMENTED();
+			case .i31;                  NOT_IMPLEMENTED();
+			case .struct_;              NOT_IMPLEMENTED();
+			case .array;                NOT_IMPLEMENTED();
+			case .exn;                  NOT_IMPLEMENTED();
+		
+			// reference types
+			case .ref;                  NOT_IMPLEMENTED();
+			case .ref_null;             NOT_IMPLEMENTED();
+		
+			// composite type
+			case .comp_func;
+				args, c, ok := read_types(module_bin, cursor);
+				if ok cursor = c;
+				else return .{}, 0, false;
+			
+				return_values, c2, ok2 := read_types(module_bin, cursor);
+				if ok2 cursor = c2;
+				else return .{}, 0, false;
+
+				types.count += 1;
+				types[types.count - 1] = .{ type = type_kind, args = args, return_values = return_values, };             
+			case .struct_field;         NOT_IMPLEMENTED();
+			case .array_index;          NOT_IMPLEMENTED();
+		
+			// recursive types (we probably aren't supporting these)
+			case .subtype;              NOT_IMPLEMENTED();
+			case .subtype_final;        NOT_IMPLEMENTED(); 
+			case .recursive_type;       NOT_IMPLEMENTED();
+			// result type 
+			case .result;
+				types.count += 1;
+				result_type, c, ok := read_types(module_bin, cursor);
+				types[types.count - 1] = .{ type = type_kind, result_type = result_type };
+			case;                      NOT_IMPLEMENTED();
+		}
+	}
+	if types_length == types.count  return types, cursor, true;
+	else return  .{}, 0, false;
+}
+
+slice :: (array: []$T, start: int, len: int) -> []T{
+	return .{
+		data = array.data + start,
+		count = min(len, array.count - start),
+	};
+}
+
+// @Incomplete: we could probably use polymorphism here instead
+read_leb_128 :: ($T: Type, input: []u8) -> T, int {
+	out: T;
 	count : int;
 
 	for input {
-		mask :u32 = it & 0x7f;
-		mask <<= it_index.(u32) * 7;
+		mask : T = it & 0x7f;
+		mask <<= it_index.(T) * 7;
 		out |= mask;
-		count = it_index;
+		count = it_index + 1;
 		if !(it & 0x80) break;
+	}
+	#if T == s32 || T == s64 {
+		if out & (1 << (count * 7 - 1))  out |= ~(0).(s32) << (count * 7);
 	}
 	return out, count;
 }
+
+
 /*                                 Typedefs and Enums                                */
 
 Reference_Type :: enum u8 #specified {
@@ -1520,7 +1621,6 @@ Section_Id :: enum u8 #specified {
 	Data_Count :: 12;
 }
 
-Function_Type :: struct {};
 Import :: struct {};
 
 Operation :: struct {
@@ -1558,12 +1658,69 @@ Function :: struct {
 	statement: []Operation;
 }
 
+Function_Type :: struct {
+	args: []Type_;
+	return_values: []Type_;
+}
+
+Limits :: struct {
+	min: u32;
+	max: u32; // may need to be u64 with memory64
+}
+
+Table_Type :: struct {
+	using limits: Limits;
+	using funcref: Funcref;
+}
+
+Memory_Type :: struct {
+	using limits: Limits;
+	shared: bool; // @Incomplete IDK if jai's compiler will add this part
+}
+
+Global_Type :: struct {
+	mutable: bool;
+	valtype: Reference_Type;
+}
+
+Type_ :: struct {
+	type : Reference_Type; // In retrospect, this is not a great name
+	union {
+		using function: Function_Type;
+		result_type: []Type_;
+		// using table: Table_Type;
+		// using memory: Memory_Type;
+		// using global: Global_Type;
+	}
+	
+}
+
+operator == :: (a: Type_, b: Type_) -> bool {
+	if a.type != b.type return false;
+	if a.type == .comp_func {
+		if a.args.count != b.args.count return false;
+		for a.args {
+			if it != b.args[it_index] return false;
+		}
+		if a.return_values.count != b.return_values.count return false;
+		for a.return_values {
+			if it != b.return_values[it_index] return false;
+		}
+	} else if a.type == .result {
+		if a.result_type.count != b.result_type.count return false;
+		for a.result_type {
+			if it != b.result_type[it_index] return false;
+		}
+	}
+	return true;
+}
+
 Module :: struct {
 	memory: [..] u8;
 	// memory.allocator == page by page allocator
 	functions: []Function;
 	tables: []*void; // tables of various type.
-	types: []Type;
+	types: []Type_;
 }
 
 Stack_Frame :: struct {
@@ -1587,13 +1744,17 @@ Funcref_Reftype :: enum u32 {
 	Extern;
 }
 
-Funcref :: struct {
-	reftype: Funcref_Reftype;
-	functype: Type;
+Funcref :: struct { // mybe we should rename this?
+	using external: External_Type;
 	union {
 		index: u32;
 		func_addr: *void;
 	}
+}
+
+External_Type :: struct {
+	reftype: Funcref_Reftype;
+	functype: Type_;
 }
 
 Stack_Entry :: union {
@@ -1629,12 +1790,24 @@ Trap :: (msg: string) #expand {
 	break `main_f; 
 }
 
+LEB128 :: ($T: Type) -> T #expand {
+	val, len := read_leb_128(T, slice(`module_bin,`cursor, 5));
+	`cursor += len;
+	return val;
+}
+
+BYTE :: () -> u8 #expand {
+	val := `module_bin[`cursor];
+	`cursor += 1;
+	return val;
+}
+
 /* @Note(caleb): This module is meant to be used as a library. But for testing and
    and ease of compilation, I've added a main function */
 main :: () {
 	args := get_command_line_arguments();
 	if args.count > 1 {
-		module := parse(read_entire_file(args[0]));
+		module := parse(cast([]u8) read_entire_file(args[0]));
 		start : u64;
 		// @Incomplete get start here
 		exec(start, module);

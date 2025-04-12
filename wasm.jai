@@ -862,6 +862,16 @@ parse :: (module_bin: []u8) -> Module, bool {
 	or_return :: () #expand {
 		if !`ok  `return .{}, false;
 	}
+	
+	import_functions, import_globals, import_tables, import_memories : [..]Import;
+	defer free(import_functions);
+	defer free(import_globals);
+	defer free(import_tables);
+	defer free(import_memories);
+
+	exports : struct {
+		main: u32;		
+	}
 
 	cursor := 8;
 	while cursor < module_bin.count {
@@ -873,13 +883,43 @@ parse :: (module_bin: []u8) -> Module, bool {
 				cursor += section_length;
 				continue;
 			case .Type;
-				if module.types return .{}, false;
+				if module.types  return .{}, false;
 				module.types, cursor, ok = read_types(module_bin, cursor);     or_return();
 				continue; 
 			case .Import;
 				imports_length := LEB128(u32);
+				array_resize(*imports, imports_length);
 				
+				for 0..imports_length-1 {
+					import: Import;
+					import.module, cursor, ok  = read_string(module_bin, cursor);              or_return();
+					import.name, cursor, ok    = read_string(module_bin, cursor);              or_return();
+					import.type                = BYTE().(Import_Type);
+
+					if import.type == {
+						case .Function;
+							import.function = LEB128(u32);
+							array_add(*import_functions, import);
+						case .Table;
+							import.table.reftype = BYTE().(Funcref_Reftype);
+							has_max := BYTE();
+							import.table.min = LEB128(u32);
+							if has_max import.table.max = LEB128(u32);
+							array_add(*import_tables, import);
+						case .Memory;
+							has_max := BYTE();
+							import.memory.min = LEB128(u32);
+							if has_max import.memory.max = LEB128(u32);
+							array_add(*import_memories, import);
+						case .Global;
+							import.global.valtype = BYTE().(Reference_Type);
+							import.global.mutable = BYTE().(bool);
+							array_add(*import_globals, import);
+					}
+					
+				}
 			case .Function;
+				a
 			case .Table;
 			case .Memory;
 			case .Global;
@@ -899,6 +939,8 @@ parse :: (module_bin: []u8) -> Module, bool {
 
 read_types :: (module_bin: []u8, current_position: int) -> []Type_, int, bool {
 	cursor := current_position;
+	
+	// @Incomplete: Should have some messages here or something
 	NOT_IMPLEMENTED :: () #expand {
 		`return .{}, 0 ,false; // WebAssembly 3.0 types
 	}
@@ -963,13 +1005,33 @@ read_types :: (module_bin: []u8, current_position: int) -> []Type_, int, bool {
 			// result type 
 			case .result;
 				types.count += 1;
-				result_type, c, ok := read_types(module_bin, cursor);
+				result_type, cursor, ok := read_types(module_bin, cursor);
 				types[types.count - 1] = .{ type = type_kind, result_type = result_type };
 			case;                      NOT_IMPLEMENTED();
 		}
 	}
 	if types_length == types.count  return types, cursor, true;
 	else return  .{}, 0, false;
+}
+
+// @Note: This allocates
+read_import :: (module_bin: []u8, current_position: int) -> Import, int, bool {
+	import : Import
+
+	// @Incomplete: This is duplicated and annoying. I wonder if we can't make a more generic version
+	ok := true;
+	or_return :: () #expand { if !`ok  `return .{}, 0, false; }
+	
+	 
+}
+
+read_string :: (module_bin: []u8, current_position: int) -> string, int, bool {
+	cursor := current_position;
+	len := LEB128(u32);
+	if module_bin.count < cursor + len return .{}, 0, false;
+
+	s : string.{ data = module_bin.data + cursor, count = len_mod };
+	return copy_string(s); // we have to copy here so we can deallocate the original data.
 }
 
 slice :: (array: []$T, start: int, len: int) -> []T{
@@ -1669,8 +1731,8 @@ Limits :: struct {
 }
 
 Table_Type :: struct {
+	reftype: Funcref_Reftype;
 	using limits: Limits;
-	using funcref: Funcref;
 }
 
 Memory_Type :: struct {
@@ -1679,8 +1741,8 @@ Memory_Type :: struct {
 }
 
 Global_Type :: struct {
-	mutable: bool;
 	valtype: Reference_Type;
+	mutable: bool;
 }
 
 Type_ :: struct {
@@ -1693,6 +1755,25 @@ Type_ :: struct {
 		// using global: Global_Type;
 	}
 	
+}
+
+Import_Type :: enum u8 {
+	Function   :: 0x01;
+	Table      :: 0x02;
+	Memory     :: 0x03;
+	Global     :: 0x04;
+}
+
+Import :: struct {
+	module: string;
+	name: string;
+	type: Import_Type;
+	using _: union {
+		function: u32;
+		table: Table_Type;
+		memory: Memory_Type;
+		global: Global_Type;
+	}
 }
 
 operator == :: (a: Type_, b: Type_) -> bool {
@@ -1790,12 +1871,14 @@ Trap :: (msg: string) #expand {
 	break `main_f; 
 }
 
+// @Incomplete: no bounds checks here
 LEB128 :: ($T: Type) -> T #expand {
 	val, len := read_leb_128(T, slice(`module_bin,`cursor, 5));
 	`cursor += len;
 	return val;
 }
 
+// @Incomplete: no bounds checks here
 BYTE :: () -> u8 #expand {
 	val := `module_bin[`cursor];
 	`cursor += 1;
@@ -1819,3 +1902,4 @@ main :: () {
 #import "Basic";
 #import "Math";
 #import "File";
+//#import "String";

@@ -9,30 +9,14 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 
 	current_function := func_idx;
 
-	defer for frames free(it.locals_storage);
-
 	while main_f := !trap {
 		function := module.functions[current_function];
+		// @Incomplete: We need to handle the case of the function being an imported function
 		statement := function.statement;
 
 		{ /* new stack frame for function call */
 			new_frame : Stack_Frame;
-			{ /* init locals */
-				// @Incomplete(caleb)
-				// This fails to pass type checking because size_of is compile_time only
-				// best bet is probably to instead use the Any type and the Type_Info struct
-				// and go from there.
-				array_resize(*new_frame.locals, function.locals.count);
-				new_frame.locals.count = function.locals.count;
-				new_frame.locals_storage = alloc(function.locals_size);
-				for function.locals {
-					local_ptr : *void;
-					if it_index == 0  local_ptr = new_frame.locals_storage;
-					else local_ptr = new_frame.locals[it_index - 1] + it.runtime_size;
-					array_add(*new_frame.locals, local_ptr);
-				}
-			}
-			new_frame.stack_length = stack.count;
+			new_frame.stack_length = stack.count; // @Incomplete: This needs to account for function signature (len of function args + len of locals)
 			new_frame.return_point = statement;
 			array_add(*frames, new_frame);
 		} // defer cleanup
@@ -114,27 +98,14 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 					operand := pop(*stack)._u32;
 					if operand >= module.tables.count Trap("bad call indirect index");
 
-					table : *[][]Funcref = module.tables[op.table];
-					funcrefs := table.*[operand];
-					
-					funcref : Funcref;
-					found_funcref: bool;
-					for funcrefs {
-						if it.functype == module.types[op.type] {
-							funcref = it;
-							found_funcref = true;
-						}
-					}
-					if !found_funcref Trap("bad call indirect funcref");
+					table := module.tables[op.table];
+					if table.reftype != .Function  Trap("bad call indirect table");
+					funcref := table.data[operand].func; // need a length check here (NEED NON_CRASHING ASSERTS)
+					func := module.functions[funcref]; 
 
-					if funcref.reftype == .Extern {
-						// @Incomplete(caleb): figure out how to get input and output
-						// types from type_info_struct
-						assert(false);
-					} else {
-						current_function = funcref.index;
-						continue main_f;
-					}
+					current_function = op.func;
+					continue main_f;
+
 				case .return_call;
 					assert(false); // not implemented (wasm 3.0);
 				case .return_call_indirect;
@@ -858,126 +829,149 @@ parse :: (module_bin: []u8) -> Module, bool {
 	print("Wasm version = %", version.([]u8));
 
 	module: Module;
-	ok := true;
-	or_return :: () #expand {
-		if !`ok  `return .{}, false;
-	}
+	sections := parse_sections(.{ data = module_bin.data + 8, count = module_bin.count - 8});
 
-	cursor := 8;
-	while cursor < module_bin.count {
-		section_id :=                 BYTE();
-		section_length :=             LEB128(u32);
-
-		if #complete section_id.(Section_Id) == {
-			case .Custom;
-				cursor += section_length;
-				continue;
-			case .Type;
-				if module.types return .{}, false;
-				module.types, cursor, ok = read_types(module_bin, cursor);     or_return();
-				continue; 
-			case .Import;
-				imports_length := LEB128(u32);
-				
-			case .Function;
-			case .Table;
-			case .Memory;
-			case .Global;
-			case .Export;
-			case .Start;
-			case .Element;
-			case .Code_;
-			case .Data;
-			case .Data_Count;
-		}
-	
-	}
-
-		
+	types := read_types(sections[1]);
+	imports := read_imports(sections[2]); // These are not linked yet.
+	// func_sigs := read_functions(sections[3]); // These are just function_types.
+			
 	return .{}, true;
 } // @Incomplete(caleb)
 
-read_types :: (module_bin: []u8, current_position: int) -> []Type_, int, bool {
-	cursor := current_position;
-	NOT_IMPLEMENTED :: () #expand {
-		`return .{}, 0 ,false; // WebAssembly 3.0 types
+parse_sections :: (module_bin: []u8) -> sections: [13][]u8 {
+	i := 0;
+	ct := module_bin.count;
+	sections : [13][]u8;
+
+	while i < ct {
+		section_id := module_bin[i];
+		section_length := module_bin[i+1];
+		sections[section_id] = .{ count = section_length, data = *module_bin[i+2] };
+		i += 2 + section_length;
 	}
-	
-	types_length := LEB128(u32);
-	types:= NewArray(types_length, Type_); // @Incomplete: Don't forget to push a context with an arena for all this!
-	while cursor < module_bin.count && types.count < types_length {
-		type_kind := BYTE().(Reference_Type);
-		if type_kind == {
-			// positive numbers are type indices
+	return sections;
+}
 
-			// numeric types
-			case .i32;                  #through;         
-			case .i64;                  #through;         
-			case .f32;                  #through;         
-			case .f64;                  #through;         
-			case .v128_;                #through;         
-			// packed types
-			case .i8;                   #through;
-			case .i16;
-				types.count += 1;
-				types[types.count - 1].type = type_kind;
-			// heap types
-			case .noexn;                NOT_IMPLEMENTED();
-			case .nofunc;               NOT_IMPLEMENTED();
-			case .noextern;             NOT_IMPLEMENTED();
-			case .none;                 NOT_IMPLEMENTED();
-			case .func_;
-			
-			case .extern;
-		
-			case .any;                  NOT_IMPLEMENTED();
-			case .eq;                   NOT_IMPLEMENTED();
-			case .i31;                  NOT_IMPLEMENTED();
-			case .struct_;              NOT_IMPLEMENTED();
-			case .array;                NOT_IMPLEMENTED();
-			case .exn;                  NOT_IMPLEMENTED();
-		
-			// reference types
-			case .ref;                  NOT_IMPLEMENTED();
-			case .ref_null;             NOT_IMPLEMENTED();
-		
-			// composite type
-			case .comp_func;
-				args, c, ok := read_types(module_bin, cursor);
-				if ok cursor = c;
-				else return .{}, 0, false;
-			
-				return_values, c2, ok2 := read_types(module_bin, cursor);
-				if ok2 cursor = c2;
-				else return .{}, 0, false;
+read_types :: (section: []u8) -> func_types: []Function_Type {
+	i : int;
+	func_types : [..]Function_Type;
 
-				types.count += 1;
-				types[types.count - 1] = .{ type = type_kind, args = args, return_values = return_values, };             
-			case .struct_field;         NOT_IMPLEMENTED();
-			case .array_index;          NOT_IMPLEMENTED();
+	while i < section.count {
+		if section[i] != 0x60  return func_types;
+		else  i += 1;
+
+		args, rets: []Value_Type;
+
+		// @Improvement: refactor duplicated code into a function
+		{
+			args_count, inc := read_leb_128(u32, array_view(section, i, 5));
+			i += inc;
+			args = array_copy(array_view(cast,force([]Value_Type) section, i, args_count)); // Value_Type is always u8 enum
+			i += args.count;
+		}
+
 		
-			// recursive types (we probably aren't supporting these)
-			case .subtype;              NOT_IMPLEMENTED();
-			case .subtype_final;        NOT_IMPLEMENTED(); 
-			case .recursive_type;       NOT_IMPLEMENTED();
-			// result type 
-			case .result;
-				types.count += 1;
-				result_type, c, ok := read_types(module_bin, cursor);
-				types[types.count - 1] = .{ type = type_kind, result_type = result_type };
-			case;                      NOT_IMPLEMENTED();
+		{
+			rets_count, inc := read_leb_128(u32, array_view(section, i, 5));
+			i += inc;
+			rets = array_copy(array_view(cast,force([]Value_Type) section, i, rets_count)); // Value_Type is always u8 enum
+			i += rets.count;
+		}
+
+		array_add(*func_types, .{ args = args, rets = rets});
+	}
+	return func_types;
+}
+
+read_imports :: (section: []u8) -> imports: Imports_Sorted {
+	num_imports, i := read_leb_128(u32, array_view(section, 0, 5));
+
+	imports : Imports_Sorted;
+
+	while i < section.count {
+		using import : Import;
+		{
+			len_mod_name, inc := read_leb_128(u32, array_view(section, i, 5));
+			i += inc;
+			module = xx array_copy(array_view(section, i, len_mod_name));
+			i += len_mod_name;
+		}
+		{
+			len_import_name, inc := read_leb_128(u32, array_view(section, i, 5));
+			i += inc;
+			name = xx array_copy(array_view(section, i, len_import_name));
+			i += len_import_name;
+		}
+
+		description_type = xx section[i];
+		i += 1;
+
+		if description_type == {
+			case .Function;
+				inc : int;
+				description.function, inc = read_leb_128(Function_Index, array_view(section, i, 5));
+				i += inc;
+
+				array_add(*imports.functions, import);
+			case .Table;
+				description.table.reftype = xx section[i];
+				i += 1;
+
+				limits_flags : Limits_Flags = xx section[i];
+				i += 1;
+
+				{
+					inc : int;
+					description.table.min, inc = read_leb_128(u64, array_view(section, i, 5));
+					i += inc;
+				}
+
+				if limits_flags & .Has_Max {
+					inc : int;
+					description.table.max, inc = read_leb_128(u64, array_view(section, i, 5));
+					i += inc;
+				}
+
+				array_add(*imports.tables, import);
+			case .Memory;
+				limits_flags : Limits_Flags = xx section[i];
+				i += 1;
+
+				{
+					inc : int;
+					description.memory.min, inc = read_leb_128(u64, array_view(section, i, 5));
+					i += inc;
+				}
+
+				if limits_flags & .Has_Max {
+					inc : int;
+					description.memory.max, inc = read_leb_128(u64, array_view(section, i, 5));
+					i += inc;
+				}
+				// @Incomplete: need to make sure jai will actually encode this.
+				description.memory.shared = xx section[i];
+				i += 1;
+
+				array_add(*imports.memories, import);
+			case .Global;
+				description.global.mutable = xx section[i];
+				i += 1;
+				description.global.val_type = xx section[i];
+				i += 1;
+
+				array_add(*imports.globals, import);
+			case;
+				assert(false, "bad import description type"); // @Incomplete: make sure asserts don't crash the host!!
 		}
 	}
-	if types_length == types.count  return types, cursor, true;
-	else return  .{}, 0, false;
+	return imports;
 }
 
-slice :: (array: []$T, start: int, len: int) -> []T{
-	return .{
-		data = array.data + start,
-		count = min(len, array.count - start),
-	};
-}
+// read_functions :: (section: []u8) -> []Function_Index {
+// 	len_functions, i := read
+// }
+
+
 
 // @Incomplete: we could probably use polymorphism here instead
 read_leb_128 :: ($T: Type, input: []u8) -> T, int {
@@ -998,9 +992,10 @@ read_leb_128 :: ($T: Type, input: []u8) -> T, int {
 }
 
 
+
 /*                                 Typedefs and Enums                                */
 
-Reference_Type :: enum u8 #specified {
+Value_Type :: enum u8 #specified {
 	// positive numbers are type indices
 
 	// numeric types
@@ -1621,8 +1616,6 @@ Section_Id :: enum u8 #specified {
 	Data_Count :: 12;
 }
 
-Import :: struct {};
-
 Operation :: struct {
 	instruction: Instruction;
 	opcode: u32;
@@ -1652,25 +1645,35 @@ Operation :: struct {
 
 // Statement :: []Operation
 
+// @Incomplete: revise call and return instructions
 Function :: struct {
-	locals: []*Type_Info;
-	locals_size: int;
-	statement: []Operation;
+	type: Function_Type;
+	using invoke : union {
+		statement: []Operation;
+		pointer: *void;
+	}
+	locals: []Value_Type; // we just increase the size of the stack to accomadate these
+	is_extern: bool;
 }
 
 Function_Type :: struct {
-	args: []Type_;
-	return_values: []Type_;
+	args: []Value_Type;
+	rets: []Value_Type;
+}
+
+Limits_Flags :: enum_flags u8 {
+	Has_Max :: 0x01;
+	Mem_64  :: 0x04;
 }
 
 Limits :: struct {
-	min: u32;
-	max: u32; // may need to be u64 with memory64
+	min: u64;
+	max: u64; // may need to be u64 with memory64
 }
 
 Table_Type :: struct {
+	reftype: Reftype;
 	using limits: Limits;
-	using funcref: Funcref;
 }
 
 Memory_Type :: struct {
@@ -1680,52 +1683,48 @@ Memory_Type :: struct {
 
 Global_Type :: struct {
 	mutable: bool;
-	valtype: Reference_Type;
+	val_type: Value_Type;
 }
 
-Type_ :: struct {
-	type : Reference_Type; // In retrospect, this is not a great name
-	union {
-		using function: Function_Type;
-		result_type: []Type_;
-		// using table: Table_Type;
-		// using memory: Memory_Type;
-		// using global: Global_Type;
-	}
-	
+Import_Description_Type :: enum u8 #specified {
+	Function :: 0x00;
+	Table :: 0x01;
+	Memory :: 0x02;
+	Global :: 0x03;
 }
 
-operator == :: (a: Type_, b: Type_) -> bool {
-	if a.type != b.type return false;
-	if a.type == .comp_func {
-		if a.args.count != b.args.count return false;
-		for a.args {
-			if it != b.args[it_index] return false;
-		}
-		if a.return_values.count != b.return_values.count return false;
-		for a.return_values {
-			if it != b.return_values[it_index] return false;
-		}
-	} else if a.type == .result {
-		if a.result_type.count != b.result_type.count return false;
-		for a.result_type {
-			if it != b.result_type[it_index] return false;
-		}
-	}
-	return true;
+Function_Index :: u32; // MAY be u64 later
+
+Import :: struct {
+	module : string;
+	name : string;
+	is_linked := false;
+	description_type : Import_Description_Type;
+	description : union {
+		function: Function_Index;
+		table : Table_Type;
+		memory : Memory_Type;
+		global : Global_Type;
+	};
+}
+
+Imports_Sorted :: struct {
+	functions : [..]Import;
+	tables : [..]Import;
+	memories : [..]Import;
+	globals : [..]Import;
 }
 
 Module :: struct {
 	memory: [..] u8;
 	// memory.allocator == page by page allocator
 	functions: []Function;
-	tables: []*void; // tables of various type.
-	types: []Type_;
+	tables: []Table; // tables of various type.
+	types: []Function_Type;
+	imports: Imports_Sorted;
 }
 
 Stack_Frame :: struct {
-	locals: [..] *void;
-	locals_storage: *void;
 	return_point: []Operation;
 	op_index: int;
 	stack_length: int;
@@ -1739,22 +1738,18 @@ Label :: struct {
 }
 
 // Table
-Funcref_Reftype :: enum u32 {
-	Module;
-	Extern;
+Reftype :: enum u8 {
+	Function :: 0x70;
+	Extern   :: 0x6F;
 }
 
-Funcref :: struct { // mybe we should rename this?
-	using external: External_Type;
-	union {
-		index: u32;
-		func_addr: *void;
-	}
-}
+Function_Reference :: int;
+External_Reference :: *void; // @Incomplete: Not certain how these are used yet.
+Reference :: union { func: Function_Reference; extern: External_Reference; };
 
-External_Type :: struct {
-	reftype: Funcref_Reftype;
-	functype: Type_;
+Table :: struct {
+	reftype : Reftype;
+	data : []Reference;
 }
 
 Stack_Entry :: union {
@@ -1784,18 +1779,21 @@ Stack_Entry :: union {
 }
 
 /* Macros */
+// @Incomplete: I hate this
 Trap :: (msg: string) #expand {
 	`trap = true;
 	`msg = msg;
 	break `main_f; 
 }
 
+// @Deprecated
 LEB128 :: ($T: Type) -> T #expand {
 	val, len := read_leb_128(T, slice(`module_bin,`cursor, 5));
 	`cursor += len;
 	return val;
 }
 
+// @Deprecated
 BYTE :: () -> u8 #expand {
 	val := `module_bin[`cursor];
 	`cursor += 1;

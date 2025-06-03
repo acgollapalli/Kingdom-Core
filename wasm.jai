@@ -831,9 +831,17 @@ parse :: (module_bin: []u8) -> Module, bool {
 	module: Module;
 	sections := parse_sections(.{ data = module_bin.data + 8, count = module_bin.count - 8});
 
-	types := read_types(sections[1]);
-	imports := read_imports(sections[2]); // These are not linked yet.
-	func_sigs := read_functions(sections[3]); // These are just function_types.
+	{
+		using Section_Id;
+		#assert(Type.(int) == 1 && Import.(int) == 2);
+		
+		types := read_types(sections[Type]); 
+		imports := read_imports(sections[Import]); // These are not linked yet.
+		func_sigs := read_functions(sections[Function]); // These are just function_types.
+		tables := read_tables(sections[Table]);
+		memory := read_memory(sections[Memory]);
+		
+	}
 			
 	return .{}, true;
 } // @Incomplete(caleb)
@@ -845,6 +853,8 @@ parse_sections :: (module_bin: []u8) -> sections: [13][]u8 {
 
 	while i < ct {
 		section_id := module_bin[i];
+		assert(section_id >= 0 && section_id <= 12, "Invalid section!" );
+		assert(sections[section_id].data == null, "Cannot restate sections!");
 		section_length := module_bin[i+1];
 		sections[section_id] = .{ count = section_length, data = *module_bin[i+2] };
 		i += 2 + section_length;
@@ -909,45 +919,27 @@ read_imports :: (section: []u8) -> imports: Imports_Sorted {
 		if description_type == {
 			case .Function;
 				inc : int;
+
 				description.function, inc = read_leb_128(Function_Index, array_view(section, i, 5));
 				i += inc;
 
 				array_add(*imports.functions, import);
 			case .Table;
+				inc : int;
+
 				description.table.reftype = xx section[i];
 				i += 1;
-
-				limits_flags : Limits_Flags = xx section[i];
-				i += 1;
-
-				{
-					inc : int;
-					description.table.min, inc = read_leb_128(u64, array_view(section, i, 5));
-					i += inc;
-				}
-
-				if limits_flags & .Has_Max {
-					inc : int;
-					description.table.max, inc = read_leb_128(u64, array_view(section, i, 5));
-					i += inc;
-				}
-
+				
+				description.table.limits, inc = read_limits(array_view(section,  i));
+				i += inc;
+				
 				array_add(*imports.tables, import);
 			case .Memory;
-				limits_flags : Limits_Flags = xx section[i];
-				i += 1;
+				inc : int;
+				
+				description.memory.limits, inc = read_limits(array_view(section, i));
+				i += inc;
 
-				{
-					inc : int;
-					description.memory.min, inc = read_leb_128(u64, array_view(section, i, 5));
-					i += inc;
-				}
-
-				if limits_flags & .Has_Max {
-					inc : int;
-					description.memory.max, inc = read_leb_128(u64, array_view(section, i, 5));
-					i += inc;
-				}
 				// @Incomplete: need to make sure jai will actually encode this.
 				description.memory.shared = xx section[i];
 				i += 1;
@@ -968,9 +960,10 @@ read_imports :: (section: []u8) -> imports: Imports_Sorted {
 }
 
 read_functions :: (section: []u8) -> []Function_Index {
-	len_functions, i := read_leb_128(u32, array_view(section, 0, 5);
-	fn_indices := NewArray(len_functtions, Function_Index, initialized=false);
+	len_functions, i := read_leb_128(u32, array_view(section, 0, 5));
+	fn_indices := NewArray(len_functions, Function_Index, initialized=false);
 
+	j : int;
 	for *fn_indices {
 		it.*, j = read_leb_128(Function_Index, array_view(section, 0, 9));
 		i += j;
@@ -979,9 +972,32 @@ read_functions :: (section: []u8) -> []Function_Index {
 	return fn_indices;	
 }
 
+read_tables :: (section: []u8) -> []Table {
+	len_tables, i := read_leb_128(u32, array_view(section, 0, 5));
+	tables := NewArray(len_tables, Table, initialized=false);
 
+	for *tables {
+		inc : int;
+		
+		it.reftype = xx section[i];
+		i += 1;
 
+		it.limits, inc = read_limits(array_view(section, i));
+		i += inc;
+	}
 
+	return tables;
+}
+
+read_memory :: (section: []u8) -> []Memory_Type {
+	len_memories, i := read_leb_128(u32, array_view(section, 0, 5));
+	memories := NewArray(len_memories, Memory_Type, initialized=false);
+	
+	for *memories {
+		// KILLBUG WAS HERE
+	}
+	return memories;
+}
 
 // @Incomplete: we could probably use polymorphism here instead
 read_leb_128 :: ($T: Type, input: []u8) -> T, int {
@@ -1001,6 +1017,27 @@ read_leb_128 :: ($T: Type, input: []u8) -> T, int {
 	return out, count;
 }
 
+read_limits :: (section: []u8) -> Limits, int {
+	i := 0;
+	limits: Limits;
+		
+	limits_flags : Limits_Flags = xx section[i];
+	i += 1;
+
+	{
+		inc : int;
+		limits.min, inc = read_leb_128(u64, array_view(section, i, 5));
+		i += inc;
+	}
+
+	if limits_flags & .Has_Max {
+		inc : int;
+		limits.max, inc = read_leb_128(u64, array_view(section, i, 5));
+		i += inc;
+	}
+
+	return limits, i;
+}
 
 
 /*                                 Typedefs and Enums                                */
@@ -1759,7 +1796,7 @@ External_Reference :: *void; // @Incomplete: Not certain how these are used yet.
 Reference :: union { func: Function_Reference; extern: External_Reference; };
 
 Table :: struct {
-	reftype : Reftype;
+	using type: Table_Type;
 	data : []Reference;
 }
 

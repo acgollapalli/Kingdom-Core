@@ -17,7 +17,17 @@ Child programs are not provided any of this. All data required for the display w
 
 Programs, regardless of whether they are a parent program or a child program, will have access to the network via iahp.  
 Programs may share memory between parent and child processes.  
-Programs will NOT have to use the asynchronous model of the browser. A simple main-loop will do.  
+Programs will NOT have to use the asynchronous model of the browser. A simple main-loop will do.
+
+### Some Unknowns:
+What will people want to make?
+Will they really want to use SDL_GPU or would they prefer the low level of control of Vulkan, with MoltenVK as a compatability layer on mac?
+Or would they want something even simpler? Maybe they don't want multithreading, or to think about networks at all, and to just have their
+whole game show up as a single bundle.
+Maybe we should just provide the simp library and something for sound?
+It's a lot simpler to provide an easier to use version than it is to add complexity you didn't account for, so we'll stick to the thing we know will
+handle all but the most involved cases.
+  
 
 ## Some notes on the engine:
 I originally started this in Odin, and got as far as a quic implementation, some mappings for wasi, and some work on a game using the SDL gpu api.  

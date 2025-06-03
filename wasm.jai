@@ -9,6 +9,8 @@ exec :: (func_idx: u64, module: Module) -> ok: bool, msg: string {
 
 	current_function := func_idx;
 
+	assert(!current_function.is_import); // @Incomplete: handle embedder functions
+
 	defer for frames free(it.locals_storage);
 
 	while main_f := !trap {
@@ -863,12 +865,6 @@ parse :: (module_bin: []u8) -> Module, bool {
 		if !`ok  `return .{}, false;
 	}
 	
-	import_functions, import_globals, import_tables, import_memories : [..]Import;
-	defer free(import_functions);
-	defer free(import_globals);
-	defer free(import_tables);
-	defer free(import_memories);
-
 	exports : struct {
 		main: u32;		
 	}
@@ -888,18 +884,19 @@ parse :: (module_bin: []u8) -> Module, bool {
 				continue; 
 			case .Import;
 				imports_length := LEB128(u32);
-				array_resize(*imports, imports_length);
 				
 				for 0..imports_length-1 {
-					import: Import;
-					import.module, cursor, ok  = read_string(module_bin, cursor);              or_return();
-					import.name, cursor, ok    = read_string(module_bin, cursor);              or_return();
-					import.type                = BYTE().(Import_Type);
+					import_module, import_name : string;
+					import_module, cursor, ok  = read_string(module_bin, cursor);              or_return();
+					import_name, cursor, ok    = read_string(module_bin, cursor);              or_return();
+					
+					import_type := BYTE().(Import_Type);
 
-					if import.type == {
+					if import_type == {
 						case .Function;
-							import.function = LEB128(u32);
-							array_add(*import_functions, import);
+							type_idx := LEB128(u32);
+							fn_ptr := link_function(import_module, import_name);
+							array_add(*module.functions, .{ is_import = true, type = module.types[type_idx], pointer = fn_ptr});
 						case .Table;
 							import.table.reftype = BYTE().(Funcref_Reftype);
 							has_max := BYTE();
@@ -912,14 +909,12 @@ parse :: (module_bin: []u8) -> Module, bool {
 							if has_max import.memory.max = LEB128(u32);
 							array_add(*import_memories, import);
 						case .Global;
-							import.global.valtype = BYTE().(Reference_Type);
+							import.global.valtype = BYTE().(Value_Type);
 							import.global.mutable = BYTE().(bool);
 							array_add(*import_globals, import);
 					}
-					
 				}
 			case .Function;
-				a
 			case .Table;
 			case .Memory;
 			case .Global;
@@ -948,7 +943,7 @@ read_types :: (module_bin: []u8, current_position: int) -> []Type_, int, bool {
 	types_length := LEB128(u32);
 	types:= NewArray(types_length, Type_); // @Incomplete: Don't forget to push a context with an arena for all this!
 	while cursor < module_bin.count && types.count < types_length {
-		type_kind := BYTE().(Reference_Type);
+		type_kind := BYTE().(Value_Type);
 		if type_kind == {
 			// positive numbers are type indices
 
@@ -1014,17 +1009,6 @@ read_types :: (module_bin: []u8, current_position: int) -> []Type_, int, bool {
 	else return  .{}, 0, false;
 }
 
-// @Note: This allocates
-read_import :: (module_bin: []u8, current_position: int) -> Import, int, bool {
-	import : Import
-
-	// @Incomplete: This is duplicated and annoying. I wonder if we can't make a more generic version
-	ok := true;
-	or_return :: () #expand { if !`ok  `return .{}, 0, false; }
-	
-	 
-}
-
 read_string :: (module_bin: []u8, current_position: int) -> string, int, bool {
 	cursor := current_position;
 	len := LEB128(u32);
@@ -1062,7 +1046,7 @@ read_leb_128 :: ($T: Type, input: []u8) -> T, int {
 
 /*                                 Typedefs and Enums                                */
 
-Reference_Type :: enum u8 #specified {
+Value_Type :: enum u8 #specified {
 	// positive numbers are type indices
 
 	// numeric types
@@ -1714,10 +1698,26 @@ Operation :: struct {
 
 // Statement :: []Operation
 
-Function :: struct {
-	locals: []*Type_Info;
+Local_Function :: struct {
+	locals: []Type_;
 	locals_size: int;
 	statement: []Operation;
+}
+
+Import_Function_Pointer :: #type ([]Stack_Entry) -> []Stack_Entry;
+
+Import_Function :: struct {
+	type: Type_;
+	//pointer: Import_Function_Pointer;
+	pointer: *void;
+}
+
+Function :: struct {
+	is_import := false;
+	using _: union {
+		using local: Local_Function;
+		using import: Import_Function;
+	}
 }
 
 Function_Type :: struct {
@@ -1730,9 +1730,25 @@ Limits :: struct {
 	max: u32; // may need to be u64 with memory64
 }
 
+Reftype :: enum u8 {
+	funcref :: 0x70;
+	externref :: 0x6F;
+}
+
 Table_Type :: struct {
-	reftype: Funcref_Reftype;
+	reftype: Reftype;
 	using limits: Limits;
+}
+
+Funcref_Table :: [..]u32; // @Improve: These are function_indices and we may want to make them u64
+Externref_Table :: [..]*void;
+
+Table :: struct {
+	using _: Table_Type;
+	union {
+		funcref : Funcref_Table;
+		externref : Externref_Table;
+	} 
 }
 
 Memory_Type :: struct {
@@ -1741,12 +1757,12 @@ Memory_Type :: struct {
 }
 
 Global_Type :: struct {
-	valtype: Reference_Type;
+	valtype: Value_Type;
 	mutable: bool;
 }
 
 Type_ :: struct {
-	type : Reference_Type; // In retrospect, this is not a great name
+	type : Value_Type; // In retrospect, this is not a great name
 	union {
 		using function: Function_Type;
 		result_type: []Type_;
@@ -1762,18 +1778,6 @@ Import_Type :: enum u8 {
 	Table      :: 0x02;
 	Memory     :: 0x03;
 	Global     :: 0x04;
-}
-
-Import :: struct {
-	module: string;
-	name: string;
-	type: Import_Type;
-	using _: union {
-		function: u32;
-		table: Table_Type;
-		memory: Memory_Type;
-		global: Global_Type;
-	}
 }
 
 operator == :: (a: Type_, b: Type_) -> bool {
@@ -1799,7 +1803,7 @@ operator == :: (a: Type_, b: Type_) -> bool {
 Module :: struct {
 	memory: [..] u8;
 	// memory.allocator == page by page allocator
-	functions: []Function;
+	functions: [..]Function;
 	tables: []*void; // tables of various type.
 	types: []Type_;
 }
@@ -1817,25 +1821,6 @@ Stack_Frame :: struct {
 Label :: struct {
 	statement: u32;
 	stack_length: int;
-}
-
-// Table
-Funcref_Reftype :: enum u32 {
-	Module;
-	Extern;
-}
-
-Funcref :: struct { // mybe we should rename this?
-	using external: External_Type;
-	union {
-		index: u32;
-		func_addr: *void;
-	}
-}
-
-External_Type :: struct {
-	reftype: Funcref_Reftype;
-	functype: Type_;
 }
 
 Stack_Entry :: union {
@@ -1883,6 +1868,12 @@ BYTE :: () -> u8 #expand {
 	val := `module_bin[`cursor];
 	`cursor += 1;
 	return val;
+}
+
+/* Not sure where to put this */
+// @Incomplete
+link_function :: (module: string, name: string) -> *void {
+	return .{};
 }
 
 /* @Note(caleb): This module is meant to be used as a library. But for testing and

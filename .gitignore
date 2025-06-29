@@ -1,0 +1,11 @@
+scratch.jai
+/.build
+/.scratch
+/*.exe
+/cert_hash.txt
+/*.pdb
+/games/home/.build
+/games/home/*.exe
+/modules/quic/.build
+/modules/quic/*.exe
+/modules/quic/*.pdb

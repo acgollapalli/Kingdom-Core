@@ -1,0 +1,48 @@
+#+TITLE Kingdom Core Todo List
+
+* WASM Runtime
+** TODO SDL3 bindings
+- Write Graphics Bindings
++ Port to SDL3 from SDL2
++ Test that the graphics bindings are working
+** TODO WASM Runtime
++ Write a quick wasm interpreter.
++ Test and Proveout Wasm Read.
++ Test and Proveout Wasm Execution
+** TODO QUIC
++ Write an RSA Implementation
++ Write the TLS 1.3 Implementation
++ Rewrite the QUIC Implementation
+** TODO Protocol
++ Write handshake code
++ Specify as you go
+** TODO WAlloc
++ Add a WAlloc Implementation
++ Add bounds checking
++ Add a WFree Implementation to free pages of memory
+** TODO Imports Table
++ Add imports table for:
+++ Video
+++ Audio
+++ Input
+++ Gamepad Vibration
+++ WAlloc/WFree
+++ Networking
+++ BACKBURNER: some kind of virtual filesystem or something
+
+* Kingdom Core
+** TODO HxA Implementation (or just use FBX like a normal person)
+** TODO Skeletal Animation (see example in modules)
+** TODO Audio
+** TODO Input
+** TODO Example Level
+** TODO Physics
+** TODO Debug UI and World Editor
+** TODO Character
+** TODO Character Interactions
+** TODO NPC AI scripting
+** TODO Character Wearables
+** TODO Character Usables
+** TODO Character-Character Interactions
+** TODO Quests and Editor
+** TODO Inter-Server Messaging and Communication

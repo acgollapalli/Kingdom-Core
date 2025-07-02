@@ -8,17 +8,25 @@
 // As stated in the readme though, we'd like to replace this with a much
 // simpler, in-house implementation of QUIC eventually though.
 
+// Before generating, init the git submodule and follow the build instructions
+// in the msquic readme.
+
+// Supported Platforms for the generator:
+// Windows: x64
+// Linux: x64
+// MacOS: arm64
+
 declaration_visitor :: (declaration: *Declaration, parent: *Declaration) -> Declaration_Visit_Result {
 	if declaration.kind == .ENUM {
-		print("FOUND ENUM: %\n", declaration.name);
+		// print("FOUND ENUM: %\n", declaration.name);
 		enum_decl := declaration.(*Enum);
 		if ends_with(enum_decl.name, "FLAGS") {
-			print("SETTING FLAGS FOR %\n", declaration.name);
+			// print("SETTING FLAGS FOR %\n", declaration.name);
 			enum_decl.flags |= .IS_ENUM_FLAGS;
 			enum_decl.flags |= .VALUES_IN_HEX;
 		}
 
-		print("set flags: %\n", enum_decl.flags);
+		// print("set flags: %\n", enum_decl.flags);
 	}
 
 	return .STOP;
@@ -35,8 +43,7 @@ generate_bindings :: () -> bool {
             output_filename          = "generated_windows.jai";
             strip_flags = 0;
 	        array_add(*libpaths,       "msquic/artifacts/bin/windows");
-			//array_add(*source_files,   "msquic/src/inc/msquic_winuser.h");
-            // array_add(*path_fragments_to_treat_as_non_system_paths, "winsock2.h", "ws2def.h", "inaddr.h", "qos.h", "ws2tcpip.h", "ws2ipdef.h", "in6addr.h", "mstcpip.h");
+	        array_add(*libnames,      "msquic");
 			footer = WINDOWS_FOOTER;
         } else #if OS == .LINUX {
             output_filename          = "generated_linux.jai";
@@ -45,12 +52,14 @@ generate_bindings :: () -> bool {
         } else #if OS == .MACOS {
             output_filename          = "generated_macos.jai";
             strip_flags = 0;
-	        array_add(*libpaths,       "darwin");
+	        array_add(*libpaths,       "msquic/artifacts/bin/macos/arm64_Debug_quictls");
+	        array_add(*libnames,      "libmsquic");
+			footer = MACOS_FOOTER;
         } else {
             assert(false);
         }
 
-        array_add(*libnames,      "msquic");
+        // array_add(*libnames,      "msquic");
 		// array_add(*include_paths, "msquic/src/inc");
         array_add(*source_files,  "msquic/src/inc/msquic.h");
         array_add(*extra_clang_arguments, "-x", "c++", "-DWIN32_LEAN_AND_MEAN");
@@ -81,6 +90,13 @@ generate_bindings :: () -> bool {
 			"in6_addr",
 			"PVOID",
 			"SOCKADDR_IN6_LH",
+			"addrinfo",
+			"in_addr_t",
+			"in_port_t",
+			"kevent",
+			"sa_family_t",
+			"sockaddr",
+			"socklen_t",
 		);
 
         // strip_flags &= ~(Strip_Flags.CONSTRUCTORS | .DESTRUCTORS);
@@ -103,6 +119,15 @@ WINDOWS_FOOTER :: #string END
 msquic :: #library "windows/msquic";
 
 #import "Windows";
+
+END
+
+
+MACOS_FOOTER :: #string END
+
+libmsquic :: #library "macos/arm64/libmsquic";
+
+#import "POSIX";
 
 END
 

@@ -1,10 +1,6 @@
 /* Kingdom Core: client */
 
-IS_CONNECTED : bool;
-HELLO_STREAM_STARTED: bool;
-HELLO_STREAM_START_COMPLETE: bool;
-HELLO_SENT: bool;
-HELLO_STREAM_ENDED: bool;
+PROTOCOL_STATE : Protocol_State;
 
 main :: () {
 	print("starting client\n");
@@ -72,3 +68,4 @@ Context :: type_of(context);
 
 #import "Basic";
 quic :: #import "quic"(IS_CLIENT=true);
+#load "protocol.jai";

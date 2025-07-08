@@ -1,11 +1,11 @@
 /*                            Kingdom Core: QUIC                            */
 
-#module_parameters(IS_CLIENT := false);
-
 PROTOCOL_STRING :: "IHMP/1.0";
 ALPN := QUIC_BUFFER.{ Length = PROTOCOL_STRING.count, Buffer = PROTOCOL_STRING };
 
-init :: (app_name: string, settings: QUIC_SETTINGS) {
+Quic_Settings :: QUIC_SETTINGS;
+
+quic_init :: (app_name: string, settings: QUIC_SETTINGS, cert_hash: string, is_client: bool ) {
 	assert(Quic_Context == null);
 	
 	init_status := MsQuicOpenVersion(QUIC_API_VERSION_2, xx *Quic_Context);
@@ -27,15 +27,10 @@ init :: (app_name: string, settings: QUIC_SETTINGS) {
 	assert(succeeded(config_status), tprint("Failed to create QUIC configuration. Status: %", config_status.(Quic_Status)));
 
 	cred_config : QUIC_CREDENTIAL_CONFIG;
-	#if IS_CLIENT {
+	if is_client {
 		cred_config.Type = .NONE;
 		cred_config.Flags |= .NO_CERTIFICATE_VALIDATION | .CLIENT;
 	} else {
-		cert_hash, found_hash := read_entire_file("W:\\kingdom-core\\cert_hash.txt"); // @Incomplete: needs to be made path invariant or a console arg;
-		assert(found_hash, "failed to find certificate hash"); // @Incomplete: you should just be able to specify key files directly as well.
-		print("Found cert hash: %\n", cert_hash);
-		defer free(cert_hash);
-
 		quic_cert_hash := read_hex_string(cert_hash);
 
 		cred_config.Type = .CERTIFICATE_HASH;
@@ -47,7 +42,7 @@ init :: (app_name: string, settings: QUIC_SETTINGS) {
 	assert(succeeded(cred_status), tprint("Failed to load QUIC credentials. Status: %\n", cred_status.(Quic_Status)));
 }
 
-close :: () {
+quic_close :: () {
 	assert(Quic_Context != null);
 	
 	Quic_Context.ConfigurationClose(Quic_Configuration);
@@ -55,20 +50,26 @@ close :: () {
 	MsQuicClose(Quic_Context);
 }
 
+Server :: HQUIC
+
 // @Note: these things both accept and return callbacks.
 // It would be totally possible to just pass the handle and context back
 // as a context function for a more native API. For a future improvment.
-start_server :: (callback: QUIC_LISTENER_CALLBACK_HANDLER, server: *HQUIC, address: *QUIC_ADDR) {
+server_start :: (callback: QUIC_LISTENER_CALLBACK, address: *QUIC_ADDR, server_context: *void) -> Server {
 	assert(Quic_Context != null);
 	
-	open_status := Quic_Context.ListenerOpen(Quic_Registration, callback, xx *context, server);
+	server: *HQUIC;
+
+	open_status := Quic_Context.ListenerOpen(Quic_Registration, xx callback, xx *server_context, server);
 	assert(succeeded(open_status), tprint("Failed to open server listener!. Status: %", open_status));
 
 	start_status := Quic_Context.ListenerStart(server.*, *ALPN, 1, address);
 	assert(succeeded(start_status), tprint("Failed to start server listener!. Status: %", start_status));
+
+	return server;
 }
 
-close_server :: (server: HQUIC) {
+server_close :: (server: HQUIC) {
 	assert(Quic_Context != null);
 	
 	Quic_Context.ListenerClose(server);
@@ -80,7 +81,7 @@ connection_set_configuration :: (conn: HQUIC) {
 
 // @Incomplete: We need to take the errors and status codes from quic so we can
 // interpret them and turn them into actual enums
-connect :: (callback: QUIC_CONNECTION_CALLBACK_HANDLER, connection: *HQUIC, address_family: QUIC_ADDRESS_FAMILY, server: string, port: u16) -> bool, Quic_Status {
+quic_connect :: (callback: QUIC_CONNECTION_CALLBACK_HANDLER, connection: *HQUIC, address_family: QUIC_ADDRESS_FAMILY, server: string, port: u16) -> bool, Quic_Status {
 	assert(Quic_Context != null);
 	
 	open_status := Quic_Context.ConnectionOpen(Quic_Registration, callback, xx *context, connection);
@@ -100,14 +101,14 @@ connect :: (callback: QUIC_CONNECTION_CALLBACK_HANDLER, connection: *HQUIC, addr
 	return true, .SUCCESS;
 }
 
-set_callback :: (handle: HQUIC, handler: QUIC_CONNECTION_CALLBACK) {
+set_connection_callback :: (handle: HQUIC, handler: QUIC_CONNECTION_CALLBACK, server: *void) {
 	assert(Quic_Context != null);
-	Quic_Context.SetCallbackHandler(handle, xx handler, xx *context);
+	Quic_Context.SetCallbackHandler(handle, xx handler, server);
 }
 
-set_callback :: (handle: Stream, handler: QUIC_STREAM_CALLBACK) {
+set_stream_callback :: (handle: Stream, handler: QUIC_STREAM_CALLBACK, server: *void) {
 	assert(Quic_Context != null);
-	Quic_Context.SetCallbackHandler(handle, xx handler, xx *context);
+	Quic_Context.SetCallbackHandler(handle, xx handler, server);
 }
 
 datagram_send :: (conn: HQUIC, buf: [][]u8, buffer_count: u32) -> Quic_Status {
@@ -233,7 +234,20 @@ read_hex_string :: (hex: string) -> QUIC_CERTIFICATE_HASH {
 	return hash;
 }
 
+Address :: struct {
+	family: enum {
+		IPv4;
+		IPv6;
+	};
+	address: union {
+		IPv4_Address;
+		IPv6_Address;
+	}
+	port: u16;
+}
 
+IPv4_Address :: [4]u8;
+IPv6_Address :: [8]u16;
 
 #scope_file
 

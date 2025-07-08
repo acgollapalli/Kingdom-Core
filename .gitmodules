@@ -1,0 +1,7 @@
+[submodule "modules/quic/msquic"]
+path = "modules/quic/msquic"
+url = git@github.com:microsoft/msquic.git
+
+[submodule "modules/sdl3"]
+path = "modules/sdl3"
+url = git@github.com:overlord-systems/jai-sdl3.git

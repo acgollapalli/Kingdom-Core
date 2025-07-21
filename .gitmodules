@@ -5,3 +5,6 @@ url = git@github.com:microsoft/msquic.git
 [submodule "modules/sdl3"]
 path = "modules/sdl3"
 url = git@github.com:overlord-systems/jai-sdl3.git
+[submodule "modules/jai-crypto"]
+	path = modules/jai-crypto
+	url = git@github.com:smari/jai-crypto.git

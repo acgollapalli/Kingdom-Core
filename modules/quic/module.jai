@@ -5,7 +5,7 @@ ALPN := QUIC_BUFFER.{ Length = PROTOCOL_STRING.count, Buffer = PROTOCOL_STRING }
 
 Quic_Settings :: QUIC_SETTINGS;
 
-quic_init :: (app_name: string, settings: QUIC_SETTINGS, cert_hash: string, is_client: bool ) {
+quic_init :: (app_name: string, settings: QUIC_SETTINGS, cert_hash := "", is_client: bool ) {
 	assert(Quic_Context == null);
 	
 	init_status := MsQuicOpenVersion(QUIC_API_VERSION_2, xx *Quic_Context);
@@ -31,6 +31,7 @@ quic_init :: (app_name: string, settings: QUIC_SETTINGS, cert_hash: string, is_c
 		cred_config.Type = .NONE;
 		cred_config.Flags |= .NO_CERTIFICATE_VALIDATION | .CLIENT;
 	} else {
+		assert(cert_hash != "", "Must provide cert hash for servers!");
 		quic_cert_hash := read_hex_string(cert_hash);
 
 		cred_config.Type = .CERTIFICATE_HASH;
@@ -111,11 +112,11 @@ set_stream_callback :: (handle: Stream, handler: QUIC_STREAM_CALLBACK, server: *
 	Quic_Context.SetCallbackHandler(handle, xx handler, server);
 }
 
-datagram_send :: (conn: HQUIC, buf: [][]u8, buffer_count: u32) -> Quic_Status {
+datagram_send :: (conn: HQUIC, buf: [][]u8) -> Quic_Status {
 	assert(Quic_Context != null);
 	
 	quic_buf : [..]QUIC_BUFFER;
-	quic_buff.allocator = temp;
+	quic_buff.allocator = temp; // not perfect. Sometimes quic can hold onto the buffers if result is not COMPLETE
 
 	for buf  array_add(*quic_buf, .{ Length = xx it.count, Buffer = it.data });
 
@@ -140,7 +141,7 @@ stream_open :: (conn: HQUIC, open_flags: QUIC_STREAM_OPEN_FLAGS, start_flags: QU
 	return result.(Quic_Status), stream;
 }
 
-stream_send :: (stream: Stream, buffers: [][]u8, flags: QUIC_SEND_FLAGS) {
+stream_send :: (stream: Stream, buffers: [][]u8, flags: QUIC_SEND_FLAGS) -> Quic_Status {
 	assert(Quic_Context != null);
 	
 	quic_buf : [..]QUIC_BUFFER;
@@ -148,7 +149,8 @@ stream_send :: (stream: Stream, buffers: [][]u8, flags: QUIC_SEND_FLAGS) {
 
 	for buffers  array_add(*quic_buf, .{ Length = xx it.count, Buffer = it.data });
 
-	Quic_Context.StreamSend(stream, quic_buf.data, xx quic_buf.count, flags, *context);
+	result := Quic_Context.StreamSend(stream, quic_buf.data, xx quic_buf.count, flags, *context);
+	return result.(Quic_Status);
 }
 
 // for QUIC_SETTINGS

@@ -32,6 +32,7 @@ Message_Table :: struct (key_type: Type, val_type: Type) {
 	entries: Message_Array(Message_Table_Entry(key_type, val_type));
 }
 
+// @Incomplete: I'm worried about a lack of bounds checks here
 get_message_data :: (message: $M, data: Message_Data) -> data.type {
 	data_ptr :=  *message._data + data.offset;
 	return data_ptr.(*d.type).*;
@@ -69,11 +70,12 @@ get_message_table :: (message: $M, table: Message_Table) -> Table(table.key_type
 // It's reasonable for a large game to develop their QUIC implementation to operate
 // this way, and part of the reason we initially started building our own QUIC implementation
 Asset_Type :: enum int {
+	Raw;
 	Player_Data;
 	Bundle;
 	Mesh;
 	Texture;
-	Texture_Mesh;
+	Mesh_Texture;
 	Shader;
 	Audio;
 	Video;
@@ -104,7 +106,7 @@ Message :: struct {
 
 /* Initial Manifest data */
 // can be called more than once in order to update manifests
-Initial :: struct {
+Initial_Message :: struct {
 	#as using _type: Control_Code = .Initial;
 	credential: Message_Array(u8); // A wallet address or public key. Not currently Used.
 	manifest: Message_Array(Asset_Entry); // just a list of assets for now. meant to be dynamic.
@@ -112,7 +114,7 @@ Initial :: struct {
 }
 
 /* WASM bundle data or other assets */
-Main :: struct {
+Main_Message :: struct {
 	#as using _type: Control_Code = .Main;
 	hash: SHA_256_Hash;
 	_data: void; // This contains asset data
@@ -125,7 +127,7 @@ Handoff_Operation :: enum int {
 }
 
 /* Hand off messages to let the server know the control state of the client */
-Handoff :: struct {
+Handoff_Message :: struct {
 	#as using _type: Control_Code = .Handoff;
 	other_party: Message_Array(u8); // a URL string for the third party;
 	op_code: Handoff_Operation;
@@ -133,11 +135,12 @@ Handoff :: struct {
 
 Control_Operation :: enum int {
 	Status;      // Server wants to know the client status (or vice versa)
+	Status_Response;
 	Passthrough; // Pass through data reliably
 	Shutdown;    // Shutdown
 }
 
-Control :: struct {
+Control_Message :: struct {
 	#as using _type: Control_Code = .Control;
 	operation: Control_Operation;
 	_data: void;
@@ -145,7 +148,7 @@ Control :: struct {
 
 
 /* Protocol Implementation */
-Protocol_State :: enum int {
+Protocol_Status :: enum int {
 	Initial; // We do not yet have a manifest
 	Loading; // We have a manifest, but we don't yet have a bundle
 	Slave;   // We have a bundle, and the program is running as a slave
@@ -158,32 +161,6 @@ Protocol_Settings :: struct {
 	address: Address;
 	certificate_hash: string;
 	quic_settings: Quic_Settings;
-}
-
-/* Ring Buffer (to be moved somewhere else) */
-Ring_Buffer :: struct(N: int, T: Type) {
-	data: [N];
-	count: int;
-	index: int;
-}
-
-ringbuf_consume :: (buf: *Ring_Buffer) -> buf.T {
-	if buf.count > 0 {
-		idx := buf.index;
-		buf.index = (buf.index + 1) % buf.N;
-		buf.count -= 1;
-
-		return buf.data[idx];
-	}
-
-	return .{};
-}
-
-ringbuf_add :: (buf: *Ring_Buffer, foo: $buf.T) {
-	open_slot := (buf.count + buf.index) % buf.N;
-	buf.data[open_slot] = foo;
-	
-	if buf.count < buf.N - 1  buf.count += 1;
 }
 
 /* Server Stuff */
@@ -209,9 +186,24 @@ Stream_State :: struct {
 	finished: bool;
 }
 
+coalesce_stream :: (stream_state: *Stream_State) -> []u8{
+	data := alloc(stream_state.total_size);
+
+	offset := 0;
+	for stream_state.data {
+		memcpy(data + offset, it.data, it.count);
+		offset += it.count;
+		
+		free(it);
+	}
+
+	return .{ count = offset, data = data };
+}
+
 Connection_State :: struct {
 	time_joined: Timestamp;
-	status: Connection_Status;
+	transport_status: Connection_Status;
+	protocol_status: Protocol_Status;
 	session_resumed: bool;
 	realtime_data: Ring_Buffer(10, Realtime_Data);
 	streams: [..]Stream_Status;
@@ -219,7 +211,11 @@ Connection_State :: struct {
 		bidirectional: int; // u16 in QUIC
 		unidirectional: int;
 	}; // useful for knowing whether you can send more assets
-	
+	manifest: [..] struct {
+		using asset_entry: Asset_Entry;
+		msg_ptr: *Message;
+		data: *void;
+	};
 }
 
 Server_Instance :: struct {
@@ -261,16 +257,16 @@ server_connection_handler :: (conn: HQUIC, server_instance_ptr: *void, event: *Q
 		print("connection handler event.Type = %\n", event.Type);
 		if event.Type == {
 		case .CONNECTED;
-			table_add(*server_instance.connections, conn, .{ time_joined = current_time_consensus(), status: session_resumed = .Connected, event.CONNECTED.SessionResumed });
+			table_add(*server_instance.connections, conn, .{ time_joined = current_time_consensus(), transport_status: .Connected, session_resumed = event.CONNECTED.SessionResumed });
 			print("Player connected!\n");
 	    case .SHUTDOWN_INITIATED_BY_TRANSPORT;
-			conn_state.status = .Shutting_Down_Transport;
+			conn_state.transport_status = .Shutting_Down_Transport;
 			print("Player disconnected by transport!\n");
 	    case .SHUTDOWN_INITIATED_BY_PEER;
-			conn_state.status = .Shutting_Down_From_Client;
+			conn_state.transport_status = .Shutting_Down_From_Client;
 			print("Player chooses to disconnect!\n");
 	    case .SHUTDOWN_COMPLETE;
-			conn_state.status = .Shutdown;
+			conn_state.transport_status = .Shutdown;
 			print("Player disconnection complete!\n");
 	    case .LOCAL_ADDRESS_CHANGED;
 	    case .PEER_ADDRESS_CHANGED;
@@ -339,15 +335,129 @@ server_stream_handler :: (stream: Stream, server_instance_ptr: *void, event: *QU
 }
 
 /* client functions */
+Client_Instance :: Server_Instance; // right now these are essentially the same;
  
+iahp_client_init :: (settings: Protocol_Settings, server: *Client_Instance) {
+	quic_init(settings.app_name, settings.quic_settings, is_client=true);
+}
+
+
+client_connect ::  (address: Address, client: *Client_Instance) -> bool {
+	conn : Connection_State;
+	quic_address_family := convert_address_family(address.family);
+	quic_address_string := convert_address_to_string(address);
+
+	result, code := quic_connect(client_connection_callback, *conn.connection_id, quic_address_family, quic_address_string, address.port);
+	if succeeded(result)  table_add(*client.connections, conn.connection_id, conn);
+	
+	return result;
+}
+
+client_connect :: (address_string: string, address_port := 1443, client: *Client_Instance) -> bool, Connection {
+	conn : Connection_State;
+
+	result, code := quic_connect(client_connection_callback, *conn.connection_id, 0, address_string, address.port);
+	if succeeded(result)  table_add(*client.connections, conn.connection_id, conn);
+	
+	return succeeded(result), conn.connection_id;
+}
+
+client_close_connection :: (conn_id: Connection, client: *Client_Instance) {}; //@Incomplete;
+
+
+/* functions for both */
+
+// maybe these should take server instances
+send_message :: (conn: Connection, m: $*T/Message, msg_data: []u8, client: *Client_Instance) -> stream {
+	result, stream = stream_open(conn, .UNIDIRECTIONAL, .NONE, stream_callback);
+	
+	buf : [2][]u8;
+	
+	buf[0].count = size_of(T);
+	buf[0].data = xx m;
+
+	buf[1] = msg_data;
+	
+	result := stream_send(stream, buf, .FIN); // we'll need to see and make sure that large files are handled fine this way
+
+	// if we wanted to keep track of the streams, this would be the place to do it.
+	assert(result == .SUCCESS);
+}
+
+send_realtime :: (conn: Connection, buf: [][]u8) {
+	result := datagram_send(conn, buf);
+	if !succeeded(result)  print("Sending datagram failed with status: %", result); // should not crash here
+}
+
+send_manifest :: (conn: Connection, credential: string, maniifest: []Asset_Entry, client_instance: *Client_Instance){
+		initial_message := Initial_Message.{
+			credential = .{ count = PLAYER_CRED.count },
+			manifest = .{ count = manifest.count, offset = credential.count }
+		};
+
+		// @Note: We could do this without the copies thanks to scatter gather
+		// we'll free this once we know that msquic has copied the message to its buffers
+		initial_d := alloc(PLAYER_CRED.count + size_of(Asset_Entry) * manifest.count);
+		memcpy(initial_d, PLAYER_CRED.data, PLAYER_CRED.count);
+		memcpy(initial_d + PLAYER_CRED.count, manifest.data, manifest.count * size_of(Asset_Entry));
+		defer free(initial_d);
+
+		stream := send_message(conn, initial_message, initial_d, client_instance);
+}
+
+seek_index :: (manifest: []Asset_Entry) -> int {
+	hash := main_msg.hash;
+	idx := -1;
+	for manifest {
+		if it.hash == hash  {
+			idx = it_index;
+			break;
+		}
+	}
+
+	return idx;
+}
+
+send_main :: (conn: Connection, hash: SHA_256_Hash, data: []u8, client_instance: *Client_Instance) {
+	msg := Main_Message.{ hash = hash };
+	send_messsage(conn, msg, client_instance);
+}
 
 /* Wasm Functions Available to the Bundle */
 
 
 /* Misc */
 
-SHA_256_Hash :: [32]u8;
+SHA_256_Hash :: [8]u32;
+sha256 :: crypto.sha256_base;
 
+/* Ring Buffer (to be moved somewhere else) */
+Ring_Buffer :: struct(N: int, T: Type) {
+	data: [N];
+	count: int;
+	index: int;
+}
 
+ringbuf_consume :: (buf: *Ring_Buffer) -> buf.T {
+	if buf.count > 0 {
+		idx := buf.index;
+		buf.index = (buf.index + 1) % buf.N;
+		buf.count -= 1;
+
+		return buf.data[idx];
+	}
+
+	return .{};
+}
+
+ringbuf_add :: (buf: *Ring_Buffer, foo: $buf.T) {
+	open_slot := (buf.count + buf.index) % buf.N;
+	buf.data[open_slot] = foo;
+	
+	if buf.count < buf.N - 1  buf.count += 1;
+}
+
+#import "Basic";
 #import "Hash_Table";
 #import "quic";
+crypto :: #import "jai-crypto";

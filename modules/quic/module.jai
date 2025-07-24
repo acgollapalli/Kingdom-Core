@@ -51,7 +51,7 @@ quic_close :: () {
 	MsQuicClose(Quic_Context);
 }
 
-Server :: HQUIC
+Server :: HQUIC;
 
 // @Note: these things both accept and return callbacks.
 // It would be totally possible to just pass the handle and context back
@@ -70,7 +70,7 @@ server_start :: (callback: QUIC_LISTENER_CALLBACK, address: *QUIC_ADDR, server_c
 	return server;
 }
 
-server_close :: (server: HQUIC) {
+server_close :: (server: Server) {
 	assert(Quic_Context != null);
 	
 	Quic_Context.ListenerClose(server);
@@ -80,9 +80,11 @@ connection_set_configuration :: (conn: HQUIC) {
 	Quic_Context.ConnectionSetConfiguration(conn, Quic_Configuration);
 }
 
+Connection :: HQUIC;
+
 // @Incomplete: We need to take the errors and status codes from quic so we can
 // interpret them and turn them into actual enums
-quic_connect :: (callback: QUIC_CONNECTION_CALLBACK_HANDLER, connection: *HQUIC, address_family: QUIC_ADDRESS_FAMILY, server: string, port: u16) -> bool, Quic_Status {
+quic_connect :: (callback: QUIC_CONNECTION_CALLBACK_HANDLER, connection: *Connection, address_family: QUIC_ADDRESS_FAMILY, server: string, port: u16) -> bool, Quic_Status {
 	assert(Quic_Context != null);
 	
 	open_status := Quic_Context.ConnectionOpen(Quic_Registration, callback, xx *context, connection);
@@ -127,12 +129,12 @@ datagram_send :: (conn: HQUIC, buf: [][]u8) -> Quic_Status {
 
 Stream :: HQUIC;
 
-stream_open :: (conn: HQUIC, open_flags: QUIC_STREAM_OPEN_FLAGS, start_flags: QUIC_STREAM_START_FLAGS, handler: QUIC_STREAM_CALLBACK) -> Quic_Status, Stream {
+stream_open :: (conn: HQUIC, open_flags: QUIC_STREAM_OPEN_FLAGS, start_flags: QUIC_STREAM_START_FLAGS, handler: QUIC_STREAM_CALLBACK, context_ptr := null) -> Quic_Status, Stream {
 	assert(Quic_Context != null);
 	
 	stream : HQUIC;
 	result : QUIC_STATUS;
-	result = Quic_Context.StreamOpen(conn, open_flags, xx handler, *context, *stream);
+	result = Quic_Context.StreamOpen(conn, open_flags, xx handler, context_ptr, *stream);
 
 	if result.(Quic_Status) == .SUCCESS {
 		result = Quic_Context.StreamStart(stream, start_flags);	
@@ -242,9 +244,9 @@ Address :: struct {
 		IPv6;
 	};
 	address: union {
-		IPv4_Address;
-		IPv6_Address;
-	}
+		IPv4: IPv4_Address;
+		IPv6: IPv6_Address;
+	};
 	port: u16;
 }
 

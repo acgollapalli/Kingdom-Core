@@ -38,22 +38,26 @@ main :: () {
 	
 }
 
-load_assets :: () -> Table(SHA_256_Hash, []u8), []Asset_Entry {
-	assets : Table(SHA_256_Hash, []u8);
+Asset_Table :: Table(SHA_256_Hash, []u8, hash => hash[0], hash_eq);
+
+load_assets :: () -> Asset_Table, []Asset_Entry {
+	assets : Asset_Table;
 	manifest : [..]Asset_Entry;
 
 	load_asset(BUNDLE_LOCATION, .Bundle, *assets, *manifest);
 	load_asset(TEXTURE_LOCATION, .Texture, *assets, *manifest);
 	load_asset(MESHTEXTURE_LOCATION, .Mesh_Texture, *assets, *manifest);
+
+	return assets, manifest;
 }
 
-load_asset :: (file: string, type: Asset_Type, assets: *Table(SHA_256_Hash, []u8), manifest: *[..]Asset_Entry) {
+load_asset :: (file: string, type: Asset_Type, assets: *Asset_Table, manifest: *[..]Asset_Entry) {
 	asset := read_entire_file(file);
 	hash := sha256(asset);
 	entry := Asset_Entry.{ type = type, size = asset.count, hash = hash };
 
-	table_add(hash, asset);
-	array_add(entry);
+	table_add(assets, hash, xx asset);
+	array_add(manifest, entry);
 }
 
 
@@ -61,3 +65,4 @@ load_asset :: (file: string, type: Asset_Type, assets: *Table(SHA_256_Hash, []u8
 
 #import "Basic";
 #import "Hash_Table";
+#import "File";

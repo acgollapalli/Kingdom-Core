@@ -54,4 +54,32 @@ Quic_Status :: enum QUIC_STATUS {
 	CERT_NO_CERT            :: #run QUIC_STATUS_CERT_ERROR(3);       // 0xBEBC403
 }
 
+convert_address :: (address: Address) -> QUIC_ADDR, QUIC_ADDRESS_FAMILY {
+	quic_addr : QUIC_ADDR;
+	quic_address_family : QUIC_ADDRESS_FAMILY;
+	if address.family == {
+		case .IPv4;
+			quic_address_family = AF_INET;
+
+			quic_addr.Ipv4 = .{
+				sin_len = size_of(sockaddr_in),
+				sin_family = AF_INET,
+				sin_port = address.port,
+				sin_addr = (*address.address.IPv4).(*in_addr).*
+			};
+		case .IPv6;
+			quic_address_family = AF_INET_6;
+			quic_addr.Ipv6 = .{
+				sin6_len = size_of(sockaddr_in6),
+				sin6_family = AF_INET_6,
+				sin6_port = address.port,
+				sin6_addr.__u6_addr.__u6_addr16 = address.address.IPv6,
+			};
+	}
+	return quic_addr, quic_address_family; 
+}
+
+AF_INET :: 2;
+AF_INET_6 :: 30;
+
 #load "generated_macos.jai";

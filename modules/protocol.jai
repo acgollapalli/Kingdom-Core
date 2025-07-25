@@ -231,9 +231,9 @@ Server_Instance :: struct {
 }
 
 iahp_server_init :: (settings: Protocol_Settings, server: *Server_Instance) {
-	quic_init(settings.app_name, settings.quic_settings, settings.cert_hash, true);
-	quic_address := convert_addresss(address); //@Incomplete: need to define this function
-	server.instance_id = server_start(server_listener_callback, quic_address, *server);
+	quic_init(settings.app_name, settings.quic_settings, settings.certificate_hash, true);
+	quic_address := convert_address(settings.address); //@Incomplete: need to define this function
+	server.instance_id = server_start(server_listener_callback, *quic_address, *server);
 }
 
 server_listener_callback :: (listener: HQUIC, server_instance: *void, event: *QUIC_LISTENER_EVENT) -> QUIC_STATUS #c_call {
@@ -263,7 +263,7 @@ server_connection_handler :: (conn: HQUIC, server_instance_ptr: *void, event: *Q
 		print("connection handler event.Type = %\n", event.Type);
 		if event.Type == {
 		case .CONNECTED;
-			table_add(*server_instance.connections, conn, .{ time_joined = current_time_consensus(), transport_status = .Connected, session_resumed = event.CONNECTED.SessionResumed });
+			table_add(*server_instance.connections, conn, .{ time_joined = current_time_consensus(), transport_status = .Connected, session_resumed = xx event.CONNECTED.SessionResumed });
 			print("Player connected!\n");
 	    case .SHUTDOWN_INITIATED_BY_TRANSPORT;
 			conn_state.transport_status = .Shutting_Down_Transport;
@@ -281,7 +281,7 @@ server_connection_handler :: (conn: HQUIC, server_instance_ptr: *void, event: *Q
 			// handle_stream(conn.(u64), event.PEER_STREAM_STARTED.Stream);
 			stream := event.PEER_STREAM_STARTED.Stream;
 			set_stream_callback(stream, server_stream_handler, server_instance);
-			table_add(server_instance.streams, stream, conn);
+			table_add(*server_instance.streams, stream, conn);
 	    case .STREAMS_AVAILABLE;
 			conn_state.streams_available = .{
 				bidirectional = event.STREAMS_AVAILABLE.BidirectionalCount,
@@ -297,7 +297,7 @@ server_connection_handler :: (conn: HQUIC, server_instance_ptr: *void, event: *Q
 	    case .DATAGRAM_RECEIVED;
 			buf := event.DATAGRAM_RECEIVED.Buffer;
 			data := array_copy([]u8.{count = buf.Length, data = buf.Buffer}); // need to make a copy because buffers are currently allocated by MsQuic
-			ringbuf_add(conn_state.realtime_data, .{ data=data, timestamp = current_time_consensus() });
+			ringbuf_add(*conn_state.realtime_data, .{ data=data, timestamp = current_time_consensus() });
 	    case .DATAGRAM_SEND_STATE_CHANGED;
 	    case .RESUMED;
 			assert(false, "We currently don't support session resumption!");
@@ -307,7 +307,7 @@ server_connection_handler :: (conn: HQUIC, server_instance_ptr: *void, event: *Q
 		case; assert(false, "Unhandled connection event!");
 		}
 	}
-	return xx q.Quic_Status.SUCCESS;
+	return xx Quic_Status.SUCCESS;
 }
 
 server_stream_handler :: (stream: Stream, server_instance_ptr: *void, event: *QUIC_STREAM_EVENT) -> QUIC_STATUS #c_call {
@@ -448,6 +448,8 @@ send_message :: (conn: Connection, m: *$T/Message, msg_data: []u8, client: *Clie
 
 	// if we wanted to keep track of the streams, this would be the place to do it.
 	assert(result == .SUCCESS);
+
+	return stream;
 }
 
 send_realtime :: (conn: Connection, buf: [][]u8) {
@@ -475,12 +477,10 @@ send_manifest :: (conn: Connection, credential: string, manifest: []Asset_Entry,
 }
 
 hash_eq :: (a: SHA_256_Hash, b: SHA_256_Hash) -> bool {
-	eq := true;
-	for 0..7 {
-		eq &&= a[it] == b[it] ;
-	}
-
-	return eq;
+	is_equal := true;
+	for 0..7  is_equal &&= a[it] == b[it] ;
+	
+	return is_equal;
 }
 
 seek_index :: (manifest: Reified_Manifest, main_msg: $T) -> int {

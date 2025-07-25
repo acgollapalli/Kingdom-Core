@@ -16,12 +16,14 @@ build_bundle :: () {
     options.emit_debug_info                     = .DWARF;
     options.backtrace_on_crash                  = .OFF; // Runtime_Support_Crash_Handler doesn’t support WASM (yet?)
     options.output_path                         = "public/";
-    options.output_executable_name              = "game.wasm";
+    options.output_executable_name              = "game";
     options.llvm_options.target_system_features = "+bulk-memory"; // "This options is needed so that "memcpy" and "memset" are mapped to "memory.copy" and "memory.fill" instructions in WASM.
     options.llvm_options.enable_split_modules   = false;
     options.llvm_options.function_sections      = true; // To get around "LLVM ERROR: section already has a defining function: .text"
 
     import_paths: [..]string;
+	array_add(*import_paths, "../../modules");
+	
     // Add our own modules folder first so that we can override modules with our own version, if necessary.
     array_add(*import_paths, tprint("%modules", #filepath));
     for options.import_path array_add(*import_paths, it);
@@ -30,7 +32,7 @@ build_bundle :: () {
     // This was compiled from https://github.com/wingo/walloc via "clang -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
     // We should probably port this allocator to Jai instead…
     //  -rluba, 2023-11-15
-    walloc_object_file_path := "../../assets/binaries/walloc.o";
+    walloc_object_file_path := "assets/binaries/walloc.o"; // @Incomplete: this belongs more properly to the walloc module and also makes it annoying to build things individually
 
     STACK_SIZE :: 24 * 1024;
     options.additional_linker_arguments = .["--stack-first", "-z", tprint("stack-size=%", STACK_SIZE), walloc_object_file_path];
@@ -74,6 +76,14 @@ build_server :: () {
     options.backend                             = .LLVM; // WASM only works with the LLVM backend, obviously.
     options.output_path                         = "public/";
     options.output_executable_name              = "server";
+
+    import_paths: [..]string;
+	array_add(*import_paths, "../../modules");
+	
+    // Add our own modules folder first so that we can override modules with our own version, if necessary.
+    array_add(*import_paths, tprint("%modules", #filepath));
+    for options.import_path array_add(*import_paths, it);
+    options.import_path = import_paths;
 
 	set_build_options(options, w);
 

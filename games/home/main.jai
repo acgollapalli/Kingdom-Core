@@ -1,6 +1,8 @@
 /* Kingdom Core: Home          Wasm Entry Point */ 
 
 
-main :: () -> {
+main :: () {
 	print("Your drill is the drill that creates the heavens!\n");
 }
+
+#import "Basic";

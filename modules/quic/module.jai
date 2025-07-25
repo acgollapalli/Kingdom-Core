@@ -59,12 +59,12 @@ Server :: HQUIC;
 server_start :: (callback: QUIC_LISTENER_CALLBACK, address: *QUIC_ADDR, server_context: *void) -> Server {
 	assert(Quic_Context != null);
 	
-	server: *HQUIC;
+	server: HQUIC;
 
-	open_status := Quic_Context.ListenerOpen(Quic_Registration, xx callback, xx *server_context, server);
+	open_status := Quic_Context.ListenerOpen(Quic_Registration, xx callback, xx *server_context, *server);
 	assert(succeeded(open_status), tprint("Failed to open server listener!. Status: %", open_status));
 
-	start_status := Quic_Context.ListenerStart(server.*, *ALPN, 1, address);
+	start_status := Quic_Context.ListenerStart(server, *ALPN, 1, address);
 	assert(succeeded(start_status), tprint("Failed to start server listener!. Status: %", start_status));
 
 	return server;

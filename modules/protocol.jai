@@ -100,6 +100,9 @@ Asset_Entry :: struct {
 }
 #assert(size_of([50]Asset_Entry) == size_of(Asset_Entry)*50);
 
+Asset_Table :: Table(SHA_256_Hash, []u8, hash => hash[0], hash_eq);
+
+
 Message :: struct {
 	type: Control_Code;
 }
@@ -110,6 +113,7 @@ Initial_Message :: struct {
 	#as using _msg : Message;
 	type = .Initial;
 	credential: Message_Array(u8); // A wallet address or public key. Not currently Used.
+    bundle_hash: SHA_256_Hash;
 	manifest: Message_Array(Asset_Entry); // just a list of assets for now. meant to be dynamic.
 	_data: void; // placeholder for data
 }
@@ -457,23 +461,27 @@ send_realtime :: (conn: Connection, buf: [][]u8) {
 	if !succeeded(result)  print("Sending datagram failed with status: %", result); // should not crash here
 }
 
-send_manifest :: (conn: Connection, credential: string, manifest: []Asset_Entry, client_instance: *Client_Instance){
-		initial_message := Initial_Message.{
-			credential = .{ count = credential.count },
-			manifest = .{ count = manifest.count, offset = credential.count }
-		};
+construct_initial_message :: (credential: string, bundle_hash: SHA_256_Hash, manifest: []Asset_Entry) -> Initial_Message, []u8 {
+    initial_message := Initial_Message.{
+        credential = .{ count = credential.count },
+        bundle_hash = bundle_hash,
+        manifest = .{ count = manifest.count, offset = credential.count }
+    };
 
-		// @Note: We could do this without the copies thanks to scatter gather
-		// we'll free this once we know that msquic has copied the message to its buffers
-		d_size := credential.count + size_of(Asset_Entry) * manifest.count;
-		initial_d := alloc(d_size);
-		memcpy(initial_d, credential.data, credential.count);
-		memcpy(initial_d + credential.count, manifest.data, manifest.count * size_of(Asset_Entry));
-		defer free(initial_d);
+    // @Note: We could do this without the copies thanks to scatter gather
+    // we'll free this once we know that msquic has copied the message to its buffers
+    d_size := credential.count + size_of(Asset_Entry) * manifest.count;
+    initial_d := NewArray(d_size, u8);
+    memcpy(initial_d.data, credential.data, credential.count);
+    memcpy(initial_d.data + credential.count, manifest.data, manifest.count * size_of(Asset_Entry));
+    return initial_message, initial_d;
+}
 
-		initial_d_array : []u8 = .{ count = d_size, data = initial_d };
+send_manifest :: (conn: Connection, credential: string, bundle_hash: SHA_256_Hash, manifest: []Asset_Entry, client_instance: *Client_Instance) {
+    initial_message, initial_d := construct_initial_message;
+	defer free(initial_d);
 
-		stream := send_message(conn, *initial_message, initial_d_array, client_instance);
+    stream := send_message(conn, *initial_message, initial_d, client_instance);
 }
 
 hash_eq :: (a: SHA_256_Hash, b: SHA_256_Hash) -> bool {

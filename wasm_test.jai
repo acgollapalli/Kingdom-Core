@@ -10,7 +10,8 @@ main :: () {
     stack_size :: 8092;
     heap_size :: 8092 *12;
     
-    wasm_error := NewArray(128, u8);
+    //wasm_error := NewArray(128, u8);
+    wasm_error : [128] u8;
     
     exported_symbols : [..] NativeSymbol;
     default_symbols := NativeSymbol.[

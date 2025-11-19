@@ -315,8 +315,8 @@ server_stream_handler :: (stream: Stream, server_instance_ptr: *void, event: *QU
 	push_context { // this may be a bad approach, actually, need to try and see
 
 		server_instance := cast (*Server_Instance) server_instance_ptr;
-		conn_id := table_find(*server_instance.streams, stream);
-		conn := table_find(*server_instance.connections, conn_id);
+		_, conn_id := table_find(*server_instance.streams, stream);
+		_, conn := table_find(*server_instance.connections, conn_id);
 		stream_state := table_find_pointer(*conn.streams, stream); // @Incomplete: holy indirection, batman!
 	
 		print("received stream event: %\n", event.Type);
@@ -498,7 +498,7 @@ seek_index :: (manifest: Reified_Manifest, main_msg: $T) -> int {
 
 send_main :: (conn: Connection, hash: SHA_256_Hash, data: []u8, client_instance: *Client_Instance) {
 	msg := Main_Message.{ hash = hash };
-	send_messsage(conn, msg, client_instance);
+	send_message(conn, *msg, data, client_instance);
 }
 
 /* Wasm Functions Available to the Bundle */

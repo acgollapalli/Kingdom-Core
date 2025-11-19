@@ -1,71 +1,97 @@
-/* Kingdom Core: client */
+/* Kingdom Core: Client */
 
-PROTOCOL_STATE : Protocol_State;
+PLAYER_CRED :: "Bearer_Token:<<Example Client Credential>>";
+HOMEPAGE :: "127.0.0.1";
 
 main :: () {
-	print("starting client\n");
 
-	quic.init("Quic client!", .{});
-	conn : quic.HQUIC;
-	stream : quic.Stream;
-	result : quic.Quic_Status;
-	// quic.connect( xx connection_callback, *conn, 2, "127.0.0.1", 8443);
-	quic.connect( xx connection_callback, *conn, 2, "127.0.0.1", 64288); // the port doesn't get set properly server-side
+	client: Client_Instance;
+	settings: Protocol_Settings;
+	iahp_client_init(settings, *client);
 
-	while main_loop := true {
-		defer reset_temporary_storage();
-		
-		if !HELLO_STREAM_STARTED {
-			result, stream = quic.stream_open(conn, .UNIDIRECTIONAL, .NONE, stream_callback);
-			print("result of opening stream %\n", result.(quic.Quic_Status));
-			assert(quic.succeeded(result));
-			HELLO_STREAM_STARTED = true; 
-		}
+	manifest : [..]Asset_Entry;
 
-		if HELLO_STREAM_START_COMPLETE && !HELLO_SENT {
-			buf := "HELLO WORLD";
-			buf_buf : [][]u8 = .[xx buf];
-			quic.stream_send(stream, buf_buf, .FIN);
-			HELLO_SENT = true;
-		}
-
-		if HELLO_STREAM_ENDED break main_loop;
-	}
-
-	// quic.close();
-}
-
-connection_callback :: (conn: quic.HQUIC, ctx: *void, event: *quic.QUIC_CONNECTION_EVENT) -> quic.QUIC_STATUS #c_call {
-	push_context {
-		print("connection handler event.Type = %\n", event.Type);
-		if event.Type == {
-			case .CONNECTED;
-				print("Connected!");
-				IS_CONNECTED = true;
-		}
-		return xx quic.Quic_Status.SUCCESS;
-	}
-}
-
-stream_callback :: (stream: quic.HQUIC, context_pointer: *void, event: *quic.QUIC_STREAM_EVENT) -> quic.QUIC_STATUS #c_call {
-	push_context {
-		print("stream handler event.Type = %\n", event.Type);
-
-		if event.Type == {
-			case .START_COMPLETE;
-				HELLO_STREAM_START_COMPLETE = true;
-			case .SHUTDOWN_COMPLETE;
-				HELLO_STREAM_ENDED = true;
-				print("HELLO STREAM ENDED IS NOW TRUE\n");
-		}
-	}
+	conn_ok, conn_id := client_connect(HOMEPAGE, client = *client);
+	send_manifest(conn_id, PLAYER_CRED, manifest, *client);
 	
-	return xx quic.Quic_Status.SUCCESS;
+	while true {
+		// read messages
+		for conn, conn_id: * client.connections { // value, key := it, it_index
+			if conn.transport_status != .Connected  continue; // @Incomplete: probably need to cleanup here
+
+			for *stream, stream_id: * conn.streams {
+				if stream.finished {
+					buf := coalesce_stream(stream);
+					msg_ptr := buf.data.(*Message);
+
+					if msg_ptr.type == {
+						case .Initial;
+							initial_msg := msg_ptr.(*Initial_Message);
+							
+							if conn.protocol_status == .Initial {
+								server_cred := get_message_array(initial_msg, initial_msg.credential);
+								if !verify_credentials(server_cred) client_close_connection(conn_id, client);
+							}
+							
+							server_manifest := get_message_array(initial_msg, initial_msg.manifest);
+							for entry: server_manifest {
+								if entry.size > 0 && seek_index(conn.manifest, entry) < 0  array_add(*conn.manifest, .{ asset_entry = entry });
+								else for conn.manifest {
+									if hash_eq(it.hash, entry.hash) {
+										free(it.msg_ptr); // you know...  it's probably fine
+										remove it;
+										break;
+									}
+								}
+							}
+							if conn.protocol_status == .Initial  conn.protocol_status == .Loading;
+							
+						case .Main;
+							main_msg := msg_ptr.(*Main_Message);
+							idx := seek_index(conn.manifest, main_msg);
+							assert(idx >= 0);
+
+							conn.manifest[idx].msg_ptr = msg_ptr;
+							conn.manifest[idx].data = *main_msg._data;
+							
+
+							// seek in array
+						case .Handoff;
+							// Will handle later
+						case .Control;
+							control_msg := msg_ptr.(*Control_Message);
+							control_data : []u8;
+							if buf.count >= size_of(Control_Message) {
+								control_data.data = buf.data + size_of(Control_Message);
+								control_data.count = buf.count - size_of(Control_Message);
+							}
+
+							if control_msg.operation == {
+								case .Status;
+									status := get_status();
+									response := Control_Message.{ operation = .Status_Response };
+								case .Passthrough;
+									// to be handled later;
+								case .Shutdown;
+									// something needs to let the wasm guest know here.
+									client_close_connection(conn_id, client);
+							}
+					}
+				}
+			}
+		}
+
+		
+	}
 }
 
+verify_credentials :: (cred: []u8) -> bool { return true; }
 
-Context :: type_of(context);
+Client_Status :: struct { }
+get_status :: () -> Client_Status { status : Client_Status; return status; }
+
+#import "protocol";
+#import "wasm";
 
 #import "Basic";
-quic :: #import "quic"(IS_CLIENT=true);
-#load "protocol.jai";
+#import "Hash_Table"; // should NOT have to import this here. @TODO: report to Jon

@@ -32,10 +32,11 @@ build_bundle :: () {
     // This was compiled from https://github.com/wingo/walloc via "clang -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
     // We should probably port this allocator to Jai instead…
     //  -rluba, 2023-11-15
-    walloc_object_file_path := "assets/binaries/walloc.o"; // @Incomplete: this belongs more properly to the walloc module and also makes it annoying to build things individually
+    walloc_object_file_path := "../../assets/binaries/walloc.o"; // @Incomplete: this belongs more properly to the walloc module and also makes it annoying to build things individually
 
     STACK_SIZE :: 24 * 1024;
     options.additional_linker_arguments = .["--stack-first", "-z", tprint("stack-size=%", STACK_SIZE), walloc_object_file_path];
+//options.additional_linker_arguments = .["--stack-first", "-z", tprint("stack-size=%", STACK_SIZE)];
 
     set_build_options(options, w);
 
@@ -89,7 +90,7 @@ build_server :: () {
 
 	compiler_begin_intercept(w);
 
-	add_build_file("server2.jai", w);
+	add_build_file("server.jai", w);
 
 	while true {
 		message := compiler_wait_for_message();

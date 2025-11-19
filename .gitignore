@@ -9,3 +9,4 @@ scratch.jai
 /modules/quic/.build
 /modules/quic/*.exe
 /modules/quic/*.pdb
+.DS_Store

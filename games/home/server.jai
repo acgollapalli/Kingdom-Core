@@ -8,21 +8,45 @@ TEXTURE_LOCATION :: "./texture.bmp";
 MESHTEXTURE_LOCATION :: "./mesh.hxa";
 
 main :: () {
+    
+    /* Basic Init Things */
+    address := IP_Address.{
+        family = .IPv4,
+        address.IPv4 = .[127,0,0,1],
+        port = 8443
+    };
 
 	server: Server_Instance;
-	settings: Protocol_Settings;
-
-	assets, manifest := load_assets();
+	settings := Protocol_Settings.{
+        app_name = "home_game",
+        address = address,
+        quic_settings = .{
+            IsSet.__bitfield = xx q.IsSetFlags.PeerUnidiStreamCount | q.IsSetFlags.PeerBidiStreamCount,
+            PeerUnidiStreamCount = 100,
+            PeerBidiStreamCount = 100,
+        }
+        
+    }; //@Incomplete: These should come from a config file
+    
+	assets : Asset_Table;
+	manifest : [..]Asset_Entry;
+	
+    bundle, bundle_hash := load_asset(BUNDLE_LOCATION, .Bundle);
+    table_add(*assets, bundle_hash, bundle);
+    array_add(*manifest, .{ type = .Bundle, size = bundle.count, hash = bundle_hash });
 	
 	iahp_server_init(settings, *server);
-
-	while true {
+    while true {}
+    /*
+    while true {
 		for conn, conn_id : * server.connections {
 			if conn.transport_status == .Connected {
+                print("connected!\n");
 				// do connnected stuff
 				if conn.protocol_status == {
 					case .Initial;
-						send_manifest(conn_id, SERVER_CRED, manifest, *server);
+                    print("sending manifest!\n");
+						send_manifest(conn_id, SERVER_CRED, bundle_hash, manifest, *server);
 						conn.protocol_status = .Loading; // THIS SHOULD COME FROM A CLIENT SIDE MESSAGE
 					// more to come
 					case .Loading;
@@ -41,21 +65,11 @@ main :: () {
 			}
 		}
 	}
+*/
 	
 }
 
 Asset_Table :: Table(SHA_256_Hash, []u8, hash => hash[0], hash_eq);
-
-load_assets :: () -> Asset_Table, []Asset_Entry {
-	assets : Asset_Table;
-	manifest : [..]Asset_Entry;
-
-	load_asset(BUNDLE_LOCATION, .Bundle, *assets, *manifest);
-	// load_asset(TEXTURE_LOCATION, .Texture, *assets, *manifest);
-	// load_asset(MESHTEXTURE_LOCATION, .Mesh_Texture, *assets, *manifest);
-
-	return assets, manifest;
-}
 
 load_asset :: (file: string, type: Asset_Type, assets: *Asset_Table, manifest: *[..]Asset_Entry) {
 	asset := read_entire_file(file);
@@ -66,8 +80,17 @@ load_asset :: (file: string, type: Asset_Type, assets: *Asset_Table, manifest: *
 	array_add(manifest, entry);
 }
 
+load_asset :: (file: string, type: Asset_Type) -> [] u8, SHA_256_Hash {
+    asset := read_entire_file(file);
+	hash := sha256(asset);
+	
+    return xx asset, hash;
+}
+
+
 
 #import "protocol";
+q :: #import "quic";
 
 #import "Basic";
 #import "Hash_Table";

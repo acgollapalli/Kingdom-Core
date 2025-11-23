@@ -51,6 +51,8 @@ load_asset :: (file: string, type: Asset_Type) -> [] u8, SHA_256_Hash {
 }
 
 
+Asset_Table :: Table(SHA_256_Hash, []u8, hash => hash[0], hash_eq);
+
 
 #import "protocol";
 

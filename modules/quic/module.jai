@@ -61,7 +61,7 @@ server_start :: (callback: QUIC_LISTENER_CALLBACK, address: *QUIC_ADDR, server_c
 	
 	server: HQUIC;
 
-	open_status := Quic_Context.ListenerOpen(Quic_Registration, xx callback, xx *server_context, *server);
+	open_status := Quic_Context.ListenerOpen(Quic_Registration, xx callback, server_context, *server);
 	assert(succeeded(open_status), tprint("Failed to open server listener!. Status: %", open_status));
 
 	start_status := Quic_Context.ListenerStart(server, *ALPN, 1, address);
@@ -84,10 +84,10 @@ Connection :: HQUIC;
 
 // @Incomplete: We need to take the errors and status codes from quic so we can
 // interpret them and turn them into actual enums
-quic_connect :: (callback: QUIC_CONNECTION_CALLBACK_HANDLER, connection: *Connection, address_family: QUIC_ADDRESS_FAMILY, server: string, port: u16) -> bool, Quic_Status {
+quic_connect :: (callback: QUIC_CONNECTION_CALLBACK_HANDLER, connection: *Connection, ctx_ptr: *void, address_family: QUIC_ADDRESS_FAMILY, server: string, port: u16) -> bool, Quic_Status {
 	assert(Quic_Context != null);
 	
-	open_status := Quic_Context.ConnectionOpen(Quic_Registration, callback, xx *context, connection);
+	open_status := Quic_Context.ConnectionOpen(Quic_Registration, callback, ctx_ptr, connection);
 	if !succeeded(open_status) {
 		print("Failed to open client connection!. Status: %\n", open_status.(Quic_Status));
 		return false, xx open_status;
@@ -96,7 +96,7 @@ quic_connect :: (callback: QUIC_CONNECTION_CALLBACK_HANDLER, connection: *Connec
 	server_c := to_c_string(server);
 	defer free(server_c);
 	start_status := Quic_Context.ConnectionStart(connection.*, Quic_Configuration, address_family, server_c, port);
-	if !succeeded(start_status) {
+	if !succeeded(start_status) && start_status.(Quic_Status) != .PENDING {
 		print("Failed to start client connection!. Status: %\n", start_status.(Quic_Status));
 		return false, xx start_status;
 	}

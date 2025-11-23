@@ -100,9 +100,6 @@ Asset_Entry :: struct {
 }
 #assert(size_of([50]Asset_Entry) == size_of(Asset_Entry)*50);
 
-Asset_Table :: Table(SHA_256_Hash, []u8, hash => hash[0], hash_eq);
-
-
 Message :: struct {
 	type: Control_Code;
 }
@@ -174,6 +171,7 @@ Protocol_Settings :: struct {
 /* Server Stuff */
 
 Connection_Status :: enum int {
+    Pending;
 	Connected;
 	Shutting_Down_Transport;
 	Shutting_Down_From_Client;
@@ -208,6 +206,11 @@ coalesce_stream :: (stream_state: *Stream_State) -> []u8{
 	return .{ count = offset, data = data };
 }
 
+Asset_State :: struct {
+    type: Asset_Type;
+    data: []u8;
+}
+
 Connection_State :: struct {
 	time_joined: Timestamp;
 	transport_status: Connection_Status;
@@ -219,7 +222,9 @@ Connection_State :: struct {
 		bidirectional: int; // u16 in QUIC
 		unidirectional: int;
 	}; // useful for knowing whether you can send more assets
-	manifest: Reified_Manifest;
+	//manifest: Table(SHA_256_Hash, Asset_Entry);//Reified_Manifest;
+    manifest: Reified_Manifest;
+    bundle_hash: SHA_256_Hash;
 };
 
 Reified_Manifest :: [..] struct {
@@ -237,17 +242,18 @@ Server_Instance :: struct {
 iahp_server_init :: (settings: Protocol_Settings, server: *Server_Instance) {
 	quic_init(settings.app_name, settings.quic_settings, settings.certificate_hash, true);
 	quic_address := convert_address(settings.address); //@Incomplete: need to define this function
-	server.instance_id = server_start(server_listener_callback, *quic_address, *server);
+	server.instance_id = server_start(server_listener_callback, *quic_address, xx server);
+    print("Started QUIC server.\n");
 }
 
 server_listener_callback :: (listener: HQUIC, server_instance: *void, event: *QUIC_LISTENER_EVENT) -> QUIC_STATUS #c_call {
 	push_context {
-		print("listener haandler event.Type = %\n", event.Type);
+		print("listener handler event.Type = %\n", event.Type);
 		if event.Type == {
 			case .NEW_CONNECTION;
 				conn := event.NEW_CONNECTION.Connection;
 				set_connection_callback(conn, server_connection_handler, server_instance);
-				connection_set_configuration(conn);
+            connection_set_configuration(conn);
 			case .STOP_COMPLETE; print("Server shutting down.\n");
 			case .DOS_MODE_CHANGED; assert(false, "DOS mode shouldn't be a consideration for us!");
 			case; assert(false, "Unhandled listener event type!");
@@ -259,17 +265,21 @@ server_listener_callback :: (listener: HQUIC, server_instance: *void, event: *QU
 
 server_connection_handler :: (conn: HQUIC, server_instance_ptr: *void, event: *QUIC_CONNECTION_EVENT) -> QUIC_STATUS #c_call {
 	push_context {
-
+		print("received connection event: %\n", event.Type);
+	
 		server_instance := cast (*Server_Instance) server_instance_ptr;
 		conn_table_ptr := *server_instance.connections;
-		conn_state := table_find_pointer(conn_table_ptr, conn);
-	
-		print("connection handler event.Type = %\n", event.Type);
-		if event.Type == {
-		case .CONNECTED;
-			table_add(*server_instance.connections, conn, .{ time_joined = current_time_consensus(), transport_status = .Connected, session_resumed = xx event.CONNECTED.SessionResumed });
+		conn_state := find_or_add(conn_table_ptr, conn);
+        
+        if event.Type == {
+            case .CONNECTED;
+			conn_state.* = .{ 
+                time_joined = current_time_consensus(),
+                transport_status = .Connected,
+                session_resumed = xx event.CONNECTED.SessionResumed 
+            };
 			print("Player connected!\n");
-	    case .SHUTDOWN_INITIATED_BY_TRANSPORT;
+            case .SHUTDOWN_INITIATED_BY_TRANSPORT;
 			conn_state.transport_status = .Shutting_Down_Transport;
 			print("Player disconnected by transport!\n");
 	    case .SHUTDOWN_INITIATED_BY_PEER;
@@ -317,13 +327,13 @@ server_connection_handler :: (conn: HQUIC, server_instance_ptr: *void, event: *Q
 server_stream_handler :: (stream: Stream, server_instance_ptr: *void, event: *QUIC_STREAM_EVENT) -> QUIC_STATUS #c_call {
 
 	push_context { // this may be a bad approach, actually, need to try and see
+		print("received stream event: %\n", event.Type);
+	
 
 		server_instance := cast (*Server_Instance) server_instance_ptr;
 		_, conn_id := table_find(*server_instance.streams, stream);
 		_, conn := table_find(*server_instance.connections, conn_id);
 		stream_state := table_find_pointer(*conn.streams, stream); // @Incomplete: holy indirection, batman!
-	
-		print("received stream event: %\n", event.Type);
 		if event.Type == {
 
 			case .RECEIVE;
@@ -355,7 +365,7 @@ iahp_client_init :: (settings: Protocol_Settings, server: *Client_Instance) {
 }
 
 
-client_connect ::  (address: Address, client: *Client_Instance) -> bool {
+client_connect ::  (address: Address, client: *Client_Instance) -> bool, Connection {
 	conn : Connection_State;
 	quic_address_family := convert_address_family(address.family);
 	quic_address_string := convert_address_to_string(address);
@@ -363,14 +373,15 @@ client_connect ::  (address: Address, client: *Client_Instance) -> bool {
 	result, code := quic_connect(client_connection_callback, *conn.connection_id, quic_address_family, quic_address_string, address.port);
 	if succeeded(result)  table_add(*client.connections, conn.connection_id, conn);
 	
-	return result;
+	return result, conn.connection_id;
 }
 
 client_connect :: (address_string: string, address_port : u16 = 1443, client: *Client_Instance) -> bool, Connection {
 	conn : Connection_State;
 	connection_id : Connection;
 
-	connected, code := quic_connect(client_connection_callback, *connection_id, 0, address_string, address_port);
+	connected, code := quic_connect(client_connection_callback, *connection_id, xx client, 2, address_string, address_port);
+    assert(connected);
 	if connected  table_add(*client.connections, connection_id, conn);
 	
 	return connected, connection_id;
@@ -383,12 +394,17 @@ client_connection_callback ::  (conn: HQUIC, client_instance_ptr: *void, event: 
 
 		client_instance := cast (*Client_Instance) client_instance_ptr;
 		conn_table_ptr := *client_instance.connections;
-		conn_state := table_find_pointer(conn_table_ptr, conn);
+        print("reading conn_state. Table size is: %.\n", conn_table_ptr.count);
+		conn_state := find_or_add(conn_table_ptr, conn);
 	
 		print("connection handler event.Type = %\n", event.Type);
 		if event.Type == {
-		case .CONNECTED;
-			table_add(*client_instance.connections, conn, .{ time_joined = current_time_consensus(), transport_status = .Connected, session_resumed = xx event.CONNECTED.SessionResumed });
+        case .CONNECTED;
+            conn_state.* = .{ 
+                time_joined = current_time_consensus(),
+                transport_status = .Connected,
+                session_resumed = xx event.CONNECTED.SessionResumed
+            };
 			print("Player connected!\n");
 	    case .SHUTDOWN_INITIATED_BY_TRANSPORT;
 			conn_state.transport_status = .Shutting_Down_Transport;
@@ -406,6 +422,7 @@ client_connection_callback ::  (conn: HQUIC, client_instance_ptr: *void, event: 
 			// handle_stream(conn.(u64), event.PEER_STREAM_STARTED.Stream);
 			stream := event.PEER_STREAM_STARTED.Stream;
 			set_stream_callback(stream, server_stream_handler, client_instance);
+            print("adding stream!\n");
 			table_add(*client_instance.streams, stream, conn);
 	    case .STREAMS_AVAILABLE;
 			conn_state.streams_available = .{
@@ -451,7 +468,7 @@ send_message :: (conn: Connection, m: *$T/Message, msg_data: []u8, client: *Clie
 	result = stream_send(stream, buf, .FIN); // we'll need to see and make sure that large files are handled fine this way
 
 	// if we wanted to keep track of the streams, this would be the place to do it.
-	assert(result == .SUCCESS);
+	assert(result == .SUCCESS || result == .PENDING);
 
 	return stream;
 }
@@ -478,8 +495,8 @@ construct_initial_message :: (credential: string, bundle_hash: SHA_256_Hash, man
 }
 
 send_manifest :: (conn: Connection, credential: string, bundle_hash: SHA_256_Hash, manifest: []Asset_Entry, client_instance: *Client_Instance) {
-    initial_message, initial_d := construct_initial_message;
-	defer free(initial_d);
+    initial_message, initial_d := construct_initial_message(credential, bundle_hash, manifest);
+	defer array_free(initial_d);
 
     stream := send_message(conn, *initial_message, initial_d, client_instance);
 }
@@ -542,6 +559,8 @@ ringbuf_add :: (buf: *Ring_Buffer, foo: buf.T) {
 	
 	if buf.count < buf.N - 1  buf.count += 1;
 }
+
+IP_Address :: Address; // @Incomplete: I hate this. It should be IP_Address everywhere or Address everywhere
 
 #import "Basic";
 #import "Hash_Table";

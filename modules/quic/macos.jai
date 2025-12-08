@@ -59,12 +59,20 @@ convert_address :: (address: Address) -> QUIC_ADDR, QUIC_ADDRESS_FAMILY {
 	quic_address_family : QUIC_ADDRESS_FAMILY;
 	if address.family == {
 		case .IPv4;
-			quic_address_family = AF_INET;
-
+        quic_address_family = AF_INET;
+        nbyte_order_port : u16;
+        {
+            port := address.port;
+            nbarray : [2]u8 = xx (*port);
+            nbarray_0 := nbarray[0];
+            nbarray[0] = nbarray[1];
+            nbarray[1] = nbarray_0;
+            nbyte_order_port = nbarray.data.(*u16).*;
+        }
 			quic_addr.Ipv4 = .{
 				sin_len = size_of(sockaddr_in),
 				sin_family = AF_INET,
-				sin_port = address.port,
+            sin_port = nbyte_order_port, //address.port,
 				sin_addr = (*address.address.IPv4).(*in_addr).*
 			};
 		case .IPv6;
@@ -74,8 +82,10 @@ convert_address :: (address: Address) -> QUIC_ADDR, QUIC_ADDRESS_FAMILY {
 				sin6_family = AF_INET_6,
 				sin6_port = address.port,
 				sin6_addr.__u6_addr.__u6_addr16 = address.address.IPv6,
-			};
+        };
 	}
+    
+        print("setting port: %\n", quic_addr.Ipv4.sin_port);
 	return quic_addr, quic_address_family; 
 }
 

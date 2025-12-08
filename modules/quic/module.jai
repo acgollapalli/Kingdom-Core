@@ -31,12 +31,23 @@ quic_init :: (app_name: string, settings: QUIC_SETTINGS, cert_hash := "", is_cli
 		cred_config.Type = .NONE;
 		cred_config.Flags |= .NO_CERTIFICATE_VALIDATION | .CLIENT;
 	} else {
-		assert(cert_hash != "", "Must provide cert hash for servers!");
-		quic_cert_hash := read_hex_string(cert_hash);
-
-		cred_config.Type = .CERTIFICATE_HASH;
-		cred_config.CertificateHash = *quic_cert_hash;
-		print("Cert hash struct is: %\n", cred_config.CertificateHash.*);
+        if cert_hash != "" {
+            assert(cert_hash != "", "Must provide cert hash for servers!");
+            quic_cert_hash := read_hex_string(cert_hash);
+            
+            cred_config.Type = .CERTIFICATE_HASH;
+            cred_config.CertificateHash = *quic_cert_hash;
+            print("Cert hash struct is: %\n", cred_config.CertificateHash.*);
+        } else {
+            cred_config.Type = .CERTIFICATE_FILE;
+            cert_file := alloc(size_of(QUIC_CERTIFICATE_FILE)).(*QUIC_CERTIFICATE_FILE);
+            cert_file.* = .{
+                PrivateKeyFile = "./server.key",
+                CertificateFile = "./server.cert"
+            };
+            cred_config.CertificateFile = cert_file;
+        }
+        
 	}
 
 	cred_status := Quic_Context.ConfigurationLoadCredential(Quic_Configuration, *cred_config);
@@ -118,7 +129,7 @@ datagram_send :: (conn: HQUIC, buf: [][]u8) -> Quic_Status {
 	assert(Quic_Context != null);
 	
 	quic_buf : [..]QUIC_BUFFER;
-	quic_buff.allocator = temp; // not perfect. Sometimes quic can hold onto the buffers if result is not COMPLETE
+	//quic_buff.allocator = temp; // not perfect. Sometimes quic can hold onto the buffers if result is not COMPLETE
 
 	for buf  array_add(*quic_buf, .{ Length = xx it.count, Buffer = it.data });
 
@@ -147,11 +158,16 @@ stream_send :: (stream: Stream, buffers: [][]u8, flags: QUIC_SEND_FLAGS) -> Quic
 	assert(Quic_Context != null);
 	
 	quic_buf : [..]QUIC_BUFFER;
-	quic_buf.allocator = temp;
+	//quic_buf.allocator = temp;
 
 	for buffers  array_add(*quic_buf, .{ Length = xx it.count, Buffer = it.data });
+    //for buffers  print("quic_buf[%]: %\n", it_index, []u8.{count=quic_buf[it_index].Length, data=quic_buf[it_index].Buffer});
 
 	result := Quic_Context.StreamSend(stream, quic_buf.data, xx quic_buf.count, flags, *context);
+    //for buffers print("buffer % after send: %\n", it_index, buffers[it_index]);
+    total_size : int;
+    for buffers  total_size += it.count;
+    print("sent % bytes on stream: %\n", total_size, stream);
 	return result.(Quic_Status);
 }
 

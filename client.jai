@@ -11,75 +11,97 @@ main :: () {
 
 	client: Client_Instance;
 	settings: Protocol_Settings;
-	iahp_client_init(settings, *client);
-    assets : Asset_Table;
+    //assets : Asset_Table;
     manifest : [..]Asset_Entry;
     bundle_hash: SHA_256_Hash;
+    
     
 	address := IP_Address.{
         family = .IPv4,
         address.IPv4 = .[127,0,0,1],
-        port = 1443
+        port = 8443
     };
     
     settings.app_name = "Client";
     settings.quic_settings = .{
-        IsSet.__bitfield = xx q.IsSetFlags.PeerUnidiStreamCount | q.IsSetFlags.PeerBidiStreamCount,
+        IsSet.__bitfield = xx q.IsSetFlags.PeerUnidiStreamCount | q.IsSetFlags.PeerBidiStreamCount | q.IsSetFlags.KeepAliveIntervalMs,
         PeerUnidiStreamCount = 100,
         PeerBidiStreamCount = 100,
+        KeepAliveIntervalMs = 50,
     };
     
     
+	iahp_client_init(settings, *client);
 	// conn_ok, conn_id := client_connect(address, *client);
-	conn_ok, conn_id := client_connect(HOMEPAGE,64288, *client);
+	conn_ok, conn_id := client_connect(HOMEPAGE,8444, *client);
 	send_manifest(conn_id, PLAYER_CRED, bundle_hash, manifest, *client);
     
-    while true {}
+    //while true {}
     
-	/*
+	
 	while true {
 		// read messages
-		for conn, conn_id: * client.connections { // value, key := it, it_index
+		for *conn, conn_id: * client.connections { // value, key := it, it_index
 			if conn.transport_status != .Connected  continue; // @Incomplete: probably need to cleanup here
 
 			for *stream, stream_id: * conn.streams {
 				if stream.finished {
 					buf := coalesce_stream(stream);
+                    //defer free(buf.data);
 					msg_ptr := buf.data.(*Message);
+                    print("RECEIVED MESSAGE OF TYPE: %\n", msg_ptr.type);
 
 					if msg_ptr.type == {
 						case .Initial;
+                        defer array_free(buf);
                         initial_msg := msg_ptr.(*Initial_Message);
-                        print("Got initial message: %\n", initial_msg.*);
-							
-							if conn.protocol_status == .Initial {
-								server_cred := get_message_array(initial_msg, initial_msg.credential);
-								if !verify_credentials(server_cred) client_close_connection(conn_id, client);
-							}
-							
-							server_manifest := get_message_array(initial_msg, initial_msg.manifest);
-							for entry: server_manifest {
-								if entry.size > 0 && seek_index(conn.manifest, entry) < 0  array_add(*conn.manifest, .{ asset_entry = entry });
-								else for conn.manifest {
-									if hash_eq(it.hash, entry.hash) {
-										free(it.msg_ptr); // you know...  it's probably fine
-										remove it;
-										break;
-									}
-								}
-							}
-							if conn.protocol_status == .Initial  conn.protocol_status == .Loading;
-							
-						case .Main;
-							main_msg := msg_ptr.(*Main_Message);
-							idx := seek_index(conn.manifest, main_msg);
-							assert(idx >= 0);
-
-							conn.manifest[idx].msg_ptr = msg_ptr;
-							conn.manifest[idx].data = *main_msg._data;
-							
-
-							// seek in array
+                        print("Got initial message: %\n", formatStruct(initial_msg.*, use_long_form_if_more_than_this_many_members=-1));
+                        
+                        // set up initial connection state, but only if this is a message modifying the 
+                        // bundle hash
+                        if conn.protocol_status == .Initial {
+                            server_cred := get_message_array(initial_msg, initial_msg.credential);
+                            if !verify_credentials(server_cred) client_close_connection(conn_id, client);
+                            conn.bundle_hash = initial_msg.bundle_hash;
+                            conn.protocol_status == .Loading;
+                        } else {
+                            assert(hash_eq(conn.bundle_hash,initial_msg.bundle_hash)); // @Incomplete: we do not support reloading the bundle as I don't know how we should impletement that yet.
+                        }
+                        
+                        server_manifest := get_message_array(initial_msg, initial_msg.manifest);
+                        print("RECEIVED_MANIFEST_OF SIZE: %\n", server_manifest.count);
+                        for entry: server_manifest {
+                            table_entry := table_find_pointer(*conn.manifest, entry.hash);
+                            if table_entry != null && entry.size > 0  asset_free(table_entry);
+                            else if table_entry == null  {
+                                table_add(*conn.manifest, entry.hash, .{ asset_entry = entry });
+                                print("adding entry: %\n", entry.hash);
+                            }
+                        }
+                        
+                        assert(table_contains(*conn.manifest, conn.bundle_hash)); // @Incomplete: we need to return a protocol error if this is not the case.
+                        
+                        print("number of entries in manifest: %\n", conn.manifest.count);
+                        
+                        case .Main;
+                        main_msg := msg_ptr.(*Main_Message);
+                        print("Got main message: %\n", formatStruct(main_msg.*, use_long_form_if_more_than_this_many_members=-1));
+                        table_entry := table_find_pointer(*conn.manifest, main_msg.hash);
+                        //print("number of entries in manifest: %\n", conn.manifest.count);
+                        assert(table_entry != null);
+                        
+                        // reify manifest entry (load the asset);
+                        if table_entry.type == .Raw || table_entry.type == .Bundle {
+                            manifest_size_correct := table_entry.size == stream.total_size - size_of(Main_Message);
+                            assert(manifest_size_correct); // @Incomplete: this will need to be a protocol error
+                            
+                            table_entry.data = *main_msg._data;
+                        } else assert(false); // not handled yet
+						
+                        print("total size of asset: % bytes\n", stream.total_size - size_of(Main_Message));
+                        
+                        if hash_eq(main_msg.hash, conn.bundle_hash)  conn.protocol_status = .Loaded;
+                        assert(conn.protocol_status == .Loaded, "hash_eq returned: % hashes don't match % vs %",hash_eq(main_msg.hash, conn.bundle_hash), main_msg.hash, conn.bundle_hash);
 						case .Handoff;
 							// Will handle later
 						case .Control;
@@ -101,7 +123,14 @@ main :: () {
 									client_close_connection(conn_id, client);
 							}
 					}
+                    
+                    // free stream state data receiver-side
+                    for stream.data  array_free(it);
+                    table_remove(*conn.streams, stream_id);
+                    table_remove(*client.streams, stream_id);
+                       
 				}
+                
 			}
             
             // actually execute stuff.
@@ -109,6 +138,15 @@ main :: () {
             if conn.protocol_status == {
                 case .Initial;
                 case .Loading;
+                
+                case .Loaded;
+                found_bundle,bundle_entry := table_find(*conn.manifest, conn.bundle_hash);
+                bundle_bin := []u8.{ count = bundle_entry.size, data = bundle_entry.data };
+                assert(found_bundle);
+                print("Executing bundle!\n");
+                exec_wasm(bundle_bin);
+                conn.protocol_status = .Master; // @Incomplete: this will change once we actually figure out changeover logic
+                
                 case .Slave;
                 case .Master;
                 case .Shutdown;
@@ -116,7 +154,7 @@ main :: () {
 		}
        	
 	}
-*/
+
 }
 
 verify_credentials :: (cred: []u8) -> bool { return true; }

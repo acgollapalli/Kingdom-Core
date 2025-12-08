@@ -156,7 +156,8 @@ Control_Message :: struct {
 Protocol_Status :: enum int {
 	Initial; // We do not yet have a manifest
 	Loading; // We have a manifest, but we don't yet have a bundle
-	Slave;   // We have a bundle, and the program is running as a slave
+	Loaded;  // We have a bundle, but the program hasn't started yet.
+    Slave;   // We have a bundle, and the program is running as a slave
 	Master;  // We have a bundle, and the program is running as a master
 	Shutdown; // We've let the server know that the bundle is shutdown on the client-side
 }
@@ -189,18 +190,24 @@ Realtime_Data :: struct {
 Stream_State :: struct {
 	data: [..][]u8;
 	total_size: int;
+    owned: bool;
 	finished: bool;
+    
 }
 
 coalesce_stream :: (stream_state: *Stream_State) -> []u8{
-	data := alloc(stream_state.total_size);
+   /* calc_total_size : int;
+    for stream_state.data  calc_total_size += it.count;
+	assert(stream_state.total_size == calc_total_size, "calc_total_size: %, total_size: %", calc_total_size, stream_state.total_size );
+   */ 
+    data := alloc(stream_state.total_size);
 
 	offset := 0;
 	for stream_state.data {
 		memcpy(data + offset, it.data, it.count);
 		offset += it.count;
 		
-		array_free(it);
+		//array_free(it);
 	}
 
 	return .{ count = offset, data = data };
@@ -227,11 +234,29 @@ Connection_State :: struct {
     bundle_hash: SHA_256_Hash;
 };
 
-Reified_Manifest :: [..] struct {
-		#as using asset_entry: Asset_Entry;
-		msg_ptr: *Message;
-		data: *void;
+Reified_Asset :: struct {
+#as using asset_entry: Asset_Entry;
+    data: *void;
 };
+
+asset_free :: (asset: *Reified_Asset) {
+    if asset.type == {
+        case .Raw; #through;
+        case .Bundle;
+        msg_ptr := asset.data - size_of(Main_Message);
+        free(msg_ptr);
+        asset.data = null;
+    }
+}
+
+Reified_Manifest :: Table(SHA_256_Hash, Reified_Asset,given_compare_function=hash_eq );
+
+//
+//Reified_Manifest :: [..] struct {
+		//#as using asset_entry: Asset_Entry;
+		//msg_ptr: *Message;
+		//data: *void;
+//};
 
 Server_Instance :: struct {
 	instance_id: Server;
@@ -240,7 +265,7 @@ Server_Instance :: struct {
 }
 
 iahp_server_init :: (settings: Protocol_Settings, server: *Server_Instance) {
-	quic_init(settings.app_name, settings.quic_settings, settings.certificate_hash, true);
+	quic_init(settings.app_name, settings.quic_settings, settings.certificate_hash, false);
 	quic_address := convert_address(settings.address); //@Incomplete: need to define this function
 	server.instance_id = server_start(server_listener_callback, *quic_address, xx server);
     print("Started QUIC server.\n");
@@ -281,7 +306,10 @@ server_connection_handler :: (conn: HQUIC, server_instance_ptr: *void, event: *Q
 			print("Player connected!\n");
             case .SHUTDOWN_INITIATED_BY_TRANSPORT;
 			conn_state.transport_status = .Shutting_Down_Transport;
-			print("Player disconnected by transport!\n");
+            
+            shutdown_event := event.SHUTDOWN_INITIATED_BY_TRANSPORT; 
+			print("Player disconnected by transport! Status: %. ErrorCode: %\n", formatInt(shutdown_event.Status, base=16), formatInt(shutdown_event.ErrorCode, base=16));
+          
 	    case .SHUTDOWN_INITIATED_BY_PEER;
 			conn_state.transport_status = .Shutting_Down_From_Client;
 			print("Player chooses to disconnect!\n");
@@ -332,8 +360,11 @@ server_stream_handler :: (stream: Stream, server_instance_ptr: *void, event: *QU
 
 		server_instance := cast (*Server_Instance) server_instance_ptr;
 		_, conn_id := table_find(*server_instance.streams, stream);
-		_, conn := table_find(*server_instance.connections, conn_id);
-		stream_state := table_find_pointer(*conn.streams, stream); // @Incomplete: holy indirection, batman!
+        assert(conn_id != null);
+		conn := table_find_pointer(*server_instance.connections, conn_id);
+        assert(conn != null);
+		stream_state := find_or_add(*conn.streams, stream); // @Incomplete: holy indirection, batman!
+        //print("streams has % streams. conn_id: %, conn: %, stream: %\n", conn.streams.count, conn_id, conn, stream);
 		if event.Type == {
 
 			case .RECEIVE;
@@ -342,16 +373,29 @@ server_stream_handler :: (stream: Stream, server_instance_ptr: *void, event: *QU
 					return xx Quic_Status.SUCCESS;
 				}
 
-				for i : 0..event.RECEIVE.BufferCount -1 { // we only expect one buffer at a time
-					buf := event.RECEIVE.Buffers[i];
-					array_add(*stream_state.data, array_copy([]u8.{ count = buf.Length, data = buf.Buffer}));
+				for i  : 0..event.RECEIVE.BufferCount -1 { // we only expect one buffer at a time
+                buf := event.RECEIVE.Buffers[i];
+                //print("buf received (% of %): %\n", i, event.RECEIVE.BufferCount, []u8.{ count = buf.Length, data = buf.Buffer });
+                //print("stream_state has % buffers\n", stream_state.data.count);
+                array_add(*stream_state.data, array_copy([]u8.{ count = buf.Length, data = buf.Buffer}));
+                stream_state.total_size += buf.Length;
+                //print("stream_state_data: %\n", stream_state.data);
 				}
-
+            //print("stream_state.total_size: %\n", stream_state.total_size);
 				if event.RECEIVE.Flags & .FIN  stream_state.finished = true;
 
-				stream_state.total_size = xx event.RECEIVE.AbsoluteOffset;
-
-				print("Received: % bytes on stream: %\n", event.RECEIVE.TotalBufferLength, stream);
+				//stream_state.total_size = xx event.RECEIVE.AbsoluteOffset;
+            //assert(stream_state.total_size != 0);
+            //print("Received: % bytes on stream: %\n", event.RECEIVE.TotalBufferLength, stream_state);
+            if stream_state.finished  print("FIN_BIT on stream: % with % buffers\n", stream_state, stream_state.data.count);
+            
+            case .SHUTDOWN_COMPLETE;
+            if stream_state.owned && stream_state.finished  {
+                // free stream state data sender-side
+                for stream_state.data  array_free(it);
+                table_remove(*server_instance.streams, stream);
+                table_remove(*conn.streams, stream);
+            }
 		}
 	}
 	return xx Quic_Status.SUCCESS;
@@ -408,7 +452,9 @@ client_connection_callback ::  (conn: HQUIC, client_instance_ptr: *void, event: 
 			print("Player connected!\n");
 	    case .SHUTDOWN_INITIATED_BY_TRANSPORT;
 			conn_state.transport_status = .Shutting_Down_Transport;
-			print("Player disconnected by transport!\n");
+            
+            shutdown_event := event.SHUTDOWN_INITIATED_BY_TRANSPORT; 
+			print("Player disconnected by transport! Status: %. ErrorCode: %\n", formatInt(shutdown_event.Status, base=16), formatInt(shutdown_event.ErrorCode, base=16));
 	    case .SHUTDOWN_INITIATED_BY_PEER;
 			conn_state.transport_status = .Shutting_Down_From_Client;
 			print("Player chooses to disconnect!\n");
@@ -429,7 +475,10 @@ client_connection_callback ::  (conn: HQUIC, client_instance_ptr: *void, event: 
 				bidirectional = event.STREAMS_AVAILABLE.BidirectionalCount,
 				unidirectional = event.STREAMS_AVAILABLE.UnidirectionalCount
 			};
-	    case .PEER_NEEDS_STREAMS;
+            print("streams available: %\n", formatStruct(event.STREAMS_AVAILABLE, -1));
+            case .PEER_NEEDS_STREAMS;
+            
+            print("PEER NEEDS STREAMS: %\n", formatStruct(event.PEER_NEEDS_STREAMS, -1));
 			// will handle when necessary
 	    case .IDEAL_PROCESSOR_CHANGED;
 	    case .DATAGRAM_STATE_CHANGED;
@@ -457,6 +506,10 @@ client_connection_callback ::  (conn: HQUIC, client_instance_ptr: *void, event: 
 // maybe these should take server instances
 send_message :: (conn: Connection, m: *$T/Message, msg_data: []u8, client: *Client_Instance) -> Stream {
 	result, stream := stream_open(conn, .UNIDIRECTIONAL, .NONE, server_stream_handler, context_ptr = xx client);
+    table_add(*client.streams, stream, conn);
+    conn_state := table_find_pointer(*client.connections, conn);
+    stream_state := table_add(*conn_state.streams, stream, .{owned = true});
+    
 	
 	buf : [2][]u8;
 	
@@ -464,11 +517,14 @@ send_message :: (conn: Connection, m: *$T/Message, msg_data: []u8, client: *Clie
 	buf[0].data = xx m;
 
 	buf[1] = msg_data;
+    
+    for buf  array_add(*stream_state.data, it);
 	
 	result = stream_send(stream, buf, .FIN); // we'll need to see and make sure that large files are handled fine this way
 
 	// if we wanted to keep track of the streams, this would be the place to do it.
 	assert(result == .SUCCESS || result == .PENDING);
+    print("sent % bytes with result = %\n", buf[0].count + buf[1].count, result);
 
 	return stream;
 }
@@ -478,8 +534,9 @@ send_realtime :: (conn: Connection, buf: [][]u8) {
 	if !succeeded(result)  print("Sending datagram failed with status: %", result); // should not crash here
 }
 
-construct_initial_message :: (credential: string, bundle_hash: SHA_256_Hash, manifest: []Asset_Entry) -> Initial_Message, []u8 {
-    initial_message := Initial_Message.{
+construct_initial_message :: (credential: string, bundle_hash: SHA_256_Hash, manifest: []Asset_Entry) -> *Initial_Message, []u8 {
+    initial_message := New(Initial_Message);
+    initial_message.* = .{
         credential = .{ count = credential.count },
         bundle_hash = bundle_hash,
         manifest = .{ count = manifest.count, offset = credential.count }
@@ -491,14 +548,16 @@ construct_initial_message :: (credential: string, bundle_hash: SHA_256_Hash, man
     initial_d := NewArray(d_size, u8);
     memcpy(initial_d.data, credential.data, credential.count);
     memcpy(initial_d.data + credential.count, manifest.data, manifest.count * size_of(Asset_Entry));
+    //assert(initial_message.type == .Initial);
+    //print("sending initial_message %\n", formatStruct(initial_message, use_long_form_if_more_than_this_many_members=-1));
     return initial_message, initial_d;
 }
 
 send_manifest :: (conn: Connection, credential: string, bundle_hash: SHA_256_Hash, manifest: []Asset_Entry, client_instance: *Client_Instance) {
     initial_message, initial_d := construct_initial_message(credential, bundle_hash, manifest);
-	defer array_free(initial_d);
+	//defer array_free(initial_d);
 
-    stream := send_message(conn, *initial_message, initial_d, client_instance);
+    stream := send_message(conn, initial_message, initial_d, client_instance);
 }
 
 hash_eq :: (a: SHA_256_Hash, b: SHA_256_Hash) -> bool {
@@ -522,8 +581,9 @@ seek_index :: (manifest: Reified_Manifest, main_msg: $T) -> int {
 }
 
 send_main :: (conn: Connection, hash: SHA_256_Hash, data: []u8, client_instance: *Client_Instance) {
-	msg := Main_Message.{ hash = hash };
-	send_message(conn, *msg, data, client_instance);
+	msg := New(Main_Message);
+    msg.hash = hash;
+	send_message(conn, msg, data, client_instance);
 }
 
 /* Wasm Functions Available to the Bundle */

@@ -12,8 +12,8 @@ main :: () {
     /* Basic Init Things */
     address := IP_Address.{
         family = .IPv4,
-        address.IPv4 = .[127,0,0,1],
-        port = 8443
+        address.IPv4 = .[0,0,0,0],
+        port = 8444
     };
 
 	server: Server_Instance;
@@ -36,12 +36,14 @@ main :: () {
     array_add(*manifest, .{ type = .Bundle, size = bundle.count, hash = bundle_hash });
 	
 	iahp_server_init(settings, *server);
-    while true {}
-    /*
+    //while true {}
+    
     while true {
-		for conn, conn_id : * server.connections {
+		for * server.connections {
+            conn, conn_id := it, it_index;
+            
+            //print("handling conn_id % in state %, protocol state %.\n", conn, conn.transport_status, conn.protocol_status);
 			if conn.transport_status == .Connected {
-                print("connected!\n");
 				// do connnected stuff
 				if conn.protocol_status == {
 					case .Initial;
@@ -50,9 +52,11 @@ main :: () {
 						conn.protocol_status = .Loading; // THIS SHOULD COME FROM A CLIENT SIDE MESSAGE
 					// more to come
 					case .Loading;
-						// THIS SHOULD ONLY SEND THE MAIN BUNDLE
+                    // THIS SHOULD ONLY SEND THE MAIN BUNDLE
+                    print("sending assets!\n");
 						for assets {
-							hash, asset := it_index, it;
+                        hash, asset := it_index, it;
+                        print("sending asset: %\n", hash);
 							send_main(conn_id, hash, asset, *server);
 						}
 						conn.protocol_status = .Master; // THIS SHOULD COME FROM A CLIENT SIDE MESSAGE
@@ -65,7 +69,7 @@ main :: () {
 			}
 		}
 	}
-*/
+
 	
 }
 

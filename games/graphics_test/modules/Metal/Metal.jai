@@ -1844,8 +1844,8 @@ MTLArgumentDescriptor :: struct {
 MTLDevice :: struct {
 
     /* MTL4 Implementation begins here */
-    METHOD(*MTLDevice, "newMTL4CommandQueue", #type () -> *MTL4CommandQueue);
-    METHOD(*MTLDevice, "newCommandBuffer", #type () -> *MTL4CommandBuffer);
+    newMTL4CommandQueue :: #insert #run METHOD("newMTL4CommandQueue", #type () -> *MTL4CommandQueue);
+    newCommandBuffer :: #insert #run METHOD("newCommandBuffer", #type () -> *MTL4CommandBuffer);
 
     /* Regular Metal Implementation begins here */
     newCommandQueue :: (self: *MTLDevice) -> *MTLCommandQueue {

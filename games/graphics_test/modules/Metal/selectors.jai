@@ -2,8 +2,10 @@
 
 __macro_generated_selectors_t :: struct #type_info_no_size_complaint {
     newMTL4CommandQueue: *void = ---;
-    commit_count: *void = ---;
     newCommandBuffer: *void = ---;
+    commit_count_: *void = ---;
+    renderCommandEncoderWithDescriptor_ : *void = ---;
+    renderCommandEncoderWithDescriptor_options_ : *void = ---;
 
 
 }

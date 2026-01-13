@@ -41,20 +41,20 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
     //if arc_pool != null  NSAutoreleasePool.drain(arc_pool); // release the last autorelease pool
     //arc_pool = objc_init(objc_alloc(NSAutoreleasePool)); // create the new autorelease pool
 
-    render_pass := MTLRenderPassDescriptor.renderPassDescriptor();
+    render_pass := objc_new(MTL4RenderPassDescriptor); //MTLRenderPassDescriptor.renderPassDescriptor();
 
     // set color targets
     for render_pass_descriptor.color_attachments {
         color_attachment := MTLRenderPassColorAttachmentDescriptorArray.objectAtIndexedSubscript(MTLRenderPassDescriptor.colorAttachments(render_pass), xx it_index);
-        MTLRenderPassAttachmentDescriptor.setTexture(color_attachment, xx it.texture);
-        MTLRenderPassAttachmentDescriptor.setLoadAction(color_attachment, it.load_op.(MTLLoadAction));
-        MTLRenderPassAttachmentDescriptor.setStoreAction(color_attachment, it.store_op.(MTLStoreAction));
-        MTLRenderPassColorAttachmentDescriptor.setClearColor(color_attachment, convert_clear_color(it.clear_color));
+        MTL4RenderPassAttachmentDescriptor.setTexture(color_attachment, xx it.texture);
+        MTL4RenderPassAttachmentDescriptor.setLoadAction(color_attachment, it.load_op.(MTLLoadAction));
+        MTL4RenderPassAttachmentDescriptor.setStoreAction(color_attachment, it.store_op.(MTLStoreAction));
+        MTL4RenderPassColorAttachmentDescriptor.setClearColor(color_attachment, convert_clear_color(it.clear_color));
     }
 
     // @TODO: set depth and stencil targets here
 
-    active_encoder = xx MTLCommandBuffer.renderCommandEncoderWithDescriptor(command_buffer, render_pass);
+    active_encoder = xx MTL4CommandBuffer.renderCommandEncoderWithDescriptor(command_buffer, render_pass);
 
 
     active_encoder_kind = .Render;
@@ -69,11 +69,13 @@ end_render_pass :: (command_buffer: CommandBuffer) {
 }
 
 get_command_queue :: () -> CommandQueue {
-    return MTLDevice.newCommandQueue(device);
+    return xx MTLDevice.newCommandQueue(device);
+    return MTLDevice.newMTL4CommandQueue(device);
 }
 
 get_command_buffer :: (command_queue: CommandQueue) -> CommandBuffer {
-    return MTLCommandQueue.commandBuffer(command_queue);
+    //return objc_new(MTL4CommandBuffer);
+    return MTLDevice.newCommandBuffer(device);
 }
 
 // We don't really need the command_queue here, though we will for metal 4.
@@ -83,7 +85,8 @@ get_command_buffer :: (command_queue: CommandQueue) -> CommandBuffer {
 // Also, the No Api example has submit_command_buffers this way, so we'll go ahead
 // and follow Aaltonen's example for now.
 submit_command_buffers :: (command_queue: CommandQueue, command_buffers: .. CommandBuffer) {
-    for command_buffers  MTLCommandBuffer.commit(it);
+    //MTL4CommandQueue.commit(command_queue, command_buffers.data, command_buffers.count);
+    //for command_buffers  MTLCommandBuffer.commit(it);
 }
 
 get_next_swapchain_image :: () -> *CAMetalDrawable {

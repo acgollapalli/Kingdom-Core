@@ -1,8 +1,8 @@
 
 #if OS == .MACOS {
     TextureHandle :: *MTLTexture;
-    CommandQueue :: *MTLCommandQueue;
-    CommandBuffer :: *MTLCommandBuffer;
+    CommandQueue :: *MTL4CommandQueue;
+    CommandBuffer :: *MTL4CommandBuffer;
     RenderPass :: *MTLRenderPassDescriptor;
     Shader :: *MTLFunction;
     RenderPipeline :: *MTLRenderPipelineState;

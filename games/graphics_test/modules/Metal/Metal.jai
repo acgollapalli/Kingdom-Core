@@ -1842,13 +1842,17 @@ MTLArgumentDescriptor :: struct {
 }
 
 MTLDevice :: struct {
+
+    /* MTL4 Implementation begins here */
+    METHOD(*MTLDevice, "newMTL4CommandQueue", #type () -> *MTL4CommandQueue);
+    METHOD(*MTLDevice, "newCommandBuffer", #type () -> *MTL4CommandBuffer);
+
+    /* Regular Metal Implementation begins here */
     newCommandQueue :: (self: *MTLDevice) -> *MTLCommandQueue {
         _func: (obj: *void, selector: *void) -> *MTLCommandQueue #c_call;
         _func = xx objc_msgSend;
         return _func(self, __selectors.newCommandQueue);
     }
-
-
 
     newCommandQueueWithMaxCommandBufferCount :: (self: *MTLDevice, maxCommandBufferCount: NSUInteger) -> *MTLCommandQueue {
         _func: (obj: *void, selector: *void, maxCommandBufferCount: NSUInteger) -> *MTLCommandQueue #c_call;

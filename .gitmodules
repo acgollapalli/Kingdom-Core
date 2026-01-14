@@ -1,15 +1,10 @@
-[submodule "odin"]
-	path = odin
-	url = git@github.com:acgollapalli/odin.git
-[submodule "odin-quic"]
-	path = net/quic
-	url = git@github.com:acgollapalli/odin-quic.git
-[submodule "net/ssl"]
-	path = net/ssl
-	url = git@github.com:acgollapalli/odin-ssl.git
-[submodule "odin-http"]
-	path = net/http
-	url = git@github.com:laytan/odin-http.git
-[submodule "ols"]
-	path = ols
-	url = git@github.com:DanielGavin/ols.git
+[submodule "modules/quic/msquic"]
+path = "modules/quic/msquic"
+url = git@github.com:microsoft/msquic.git
+
+[submodule "modules/sdl3"]
+path = "modules/sdl3"
+url = git@github.com:overlord-systems/jai-sdl3.git
+[submodule "modules/jai-crypto"]
+	path = modules/jai-crypto
+	url = git@github.com:smari/jai-crypto.git

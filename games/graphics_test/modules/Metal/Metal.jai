@@ -54,6 +54,13 @@ CAMetalDrawable :: struct {
         _func = xx objc_msgSend;
         return _func(self, __selectors.layer);
     }
+
+    //present :: #insert #run METHOD("present", #type () -> ());
+    present :: (self: *CAMetalDrawable) {
+        _func: (obj: *void, selector: *void) -> *CAMetalLayer #c_call;
+        _func = xx objc_msgSend;
+        _func(self, __macro_generated_selectors.present);
+    }
 }
 
 CAMetalLayer :: struct {
@@ -1844,8 +1851,19 @@ MTLArgumentDescriptor :: struct {
 MTLDevice :: struct {
 
     /* MTL4 Implementation begins here */
-    newMTL4CommandQueue :: #insert #run METHOD("newMTL4CommandQueue", #type () -> *MTL4CommandQueue);
-    newCommandBuffer :: #insert #run METHOD("newCommandBuffer", #type () -> *MTL4CommandBuffer);
+    //newMTL4CommandQueue :: #insert #run METHOD("newMTL4CommandQueue", #type () -> *MTL4CommandQueue);
+    newMTL4CommandQueue :: (self: *MTLDevice) -> *MTL4CommandQueue {
+        _func: (obj: *void, selector: *void) -> *MTL4CommandQueue #c_call;
+        _func = xx objc_msgSend;
+        return _func(self, __macro_generated_selectors.newMTL4CommandQueue);
+    }
+
+    //newCommandBuffer :: #insert #run METHOD("newCommandBuffer", #type () -> *MTL4CommandBuffer);
+    newCommandBuffer :: (self: *MTLDevice) -> *MTL4CommandBuffer {
+        _func: (obj: *void, selector: *void) -> *MTL4CommandBuffer #c_call;
+        _func = xx objc_msgSend;
+        return _func(self, __macro_generated_selectors.newCommandBuffer);
+    }
 
     /* Regular Metal Implementation begins here */
     newCommandQueue :: (self: *MTLDevice) -> *MTLCommandQueue {

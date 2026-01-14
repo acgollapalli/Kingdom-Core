@@ -2,13 +2,14 @@
 
 #scope_export
 
-MTL4CommandQueue :: struct {
-    commit :: #insert #run METHOD("commit:count", #type (commandBuffers: *MTL4CommandBuffer, count: NSUInteger) -> ());
-}
-MTL4CommandBuffer :: struct {
-    renderCommandEncoderWithDescriptor :: #insert #run METHOD("renderCommandEncoderWithDescriptor:", #type(descriptor: *MTL4RenderPassDescriptor) -> *MTL4RenderCommandEncoder);
-    renderCommandEncoderWithDescriptor :: #insert #run METHOD("renderCommandEncoderWithDescriptor:options:", #type(descriptor: *MTL4RenderPassDescriptor, options: MTL4RenderEncoderOptions) -> *MTL4RenderCommandEncoder);
-}
+MTL4CommandQueue :: struct {}
+#insert #run METHOD(*MTL4CommandQueue, "commit:count:", #type (commandBuffers: **MTL4CommandBuffer, count: NSUInteger) -> ());
+#insert #run METHOD(*MTL4CommandQueue, "signalDrawable:", #type (drawable: *CAMetalDrawable) -> ());
+#insert #run METHOD(*MTL4CommandQueue, "waitForDrawable:", #type (drawable: *CAMetalDrawable) -> ());
+
+MTL4CommandBuffer :: struct {}
+#insert #run METHOD(*MTL4CommandBuffer, "renderCommandEncoderWithDescriptor:", #type(descriptor: *MTL4RenderPassDescriptor) -> *MTL4RenderCommandEncoder);
+#insert #run METHOD(*MTL4CommandBuffer, "renderCommandEncoderWithDescriptor:options:", #type(descriptor: *MTL4RenderPassDescriptor, options: MTL4RenderEncoderOptions) -> *MTL4RenderCommandEncoder);
 
 MTL4RenderEncoderOptions :: enum NSUInteger {
     RenderEncoderOptionNone :: 0;
@@ -17,16 +18,14 @@ MTL4RenderEncoderOptions :: enum NSUInteger {
 }
 
 MTL4RenderCommandEncoder :: struct {}
+#insert #run METHOD(*MTL4RenderCommandEncoder, "endEncoding", #type () -> ());
+#insert #run METHOD(*MTL4RenderCommandEncoder, "setRenderPipelineState:", #type (pipelineState: *MTLRenderPipelineState) -> ());
+
 MTL4ComputeCommandEncoder :: struct {}
 
-MTLRenderPassColorAttachmentDescriptorArray :: struct {
-    
-}
 
-MTL4RenderPassDescriptor :: struct {
-    colorAttachments :: #insert #run METHOD("colorAttachments", #type () -> *MTLRenderPassColorAttachmentDescriptorArray);
-
-}
+MTL4RenderPassDescriptor :: struct {}
+#insert #run METHOD(*MTL4RenderPassDescriptor, "colorAttachments", #type () -> *MTLRenderPassColorAttachmentDescriptorArray);
 
 #scope_module
 

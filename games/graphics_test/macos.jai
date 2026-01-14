@@ -45,48 +45,57 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
 
     // set color targets
     for render_pass_descriptor.color_attachments {
-        color_attachment := MTLRenderPassColorAttachmentDescriptorArray.objectAtIndexedSubscript(MTLRenderPassDescriptor.colorAttachments(render_pass), xx it_index);
-        MTL4RenderPassAttachmentDescriptor.setTexture(color_attachment, xx it.texture);
-        MTL4RenderPassAttachmentDescriptor.setLoadAction(color_attachment, it.load_op.(MTLLoadAction));
-        MTL4RenderPassAttachmentDescriptor.setStoreAction(color_attachment, it.store_op.(MTLStoreAction));
-        MTL4RenderPassColorAttachmentDescriptor.setClearColor(color_attachment, convert_clear_color(it.clear_color));
+        color_attachment := MTLRenderPassColorAttachmentDescriptorArray.objectAtIndexedSubscript(colorAttachments(render_pass), xx it_index);
+        MTLRenderPassColorAttachmentDescriptor.setTexture(color_attachment, xx it.texture);
+        MTLRenderPassColorAttachmentDescriptor.setLoadAction(color_attachment, it.load_op.(MTLLoadAction));
+        MTLRenderPassColorAttachmentDescriptor.setStoreAction(color_attachment, it.store_op.(MTLStoreAction));
+        MTLRenderPassColorAttachmentDescriptor.setClearColor(color_attachment, convert_clear_color(it.clear_color));
     }
 
-    // @TODO: set depth and stencil targets here
+    if command_buffer.active_encoder != null  release(command_buffer.active_encoder); // TODO: see if this is necessary
+    command_buffer.active_encoder = renderCommandEncoderWithDescriptor(command_buffer.buffer, render_pass);
 
-    active_encoder = xx MTL4CommandBuffer.renderCommandEncoderWithDescriptor(command_buffer, render_pass);
-
-
-    active_encoder_kind = .Render;
+    command_buffer.active_encoder_kind = .Render;
     return render_pass;
 }
 
 end_render_pass :: (command_buffer: CommandBuffer) {
-    assert(active_encoder_kind == .Render); // @TODO: need to ensure this becomes a wasm_runtime_assert in wasm
-    MTLRenderCommandEncoder.endEncoding(xx active_encoder);
-   active_encoder = null;
-    active_encoder_kind = .None;
+    assert(command_buffer.active_encoder_kind == .Render); // @TODO: need to ensure this becomes a wasm_runtime_assert in wasm
+    endEncoding(command_buffer.active_encoder);
+    release(command_buffer.active_encoder); // TODO: We may be able to reuse these. But should we? It adds complexity
+    command_buffer.active_encoder = null;
+    command_buffer.active_encoder_kind = .None;
 }
 
 get_command_queue :: () -> CommandQueue {
-    return xx MTLDevice.newCommandQueue(device);
     return MTLDevice.newMTL4CommandQueue(device);
 }
 
 get_command_buffer :: (command_queue: CommandQueue) -> CommandBuffer {
-    //return objc_new(MTL4CommandBuffer);
-    return MTLDevice.newCommandBuffer(device);
+    command_buffer := New(CommandBuffer_);
+    command_buffer.buffer = MTLDevice.newCommandBuffer(device);
+    command_buffer.allocator = get_command_allocator_from_pool();
+    return command_buffer;
 }
 
-// We don't really need the command_queue here, though we will for metal 4.
-// Unfortunately, the metal bindings that currently ship with jai's compiler don't
-// support it just yet, so we'll either have to build our own and submit them, or
-// else just wait until Jon or Raphael update them.
-// Also, the No Api example has submit_command_buffers this way, so we'll go ahead
-// and follow Aaltonen's example for now.
+start_command_recording :: (command_buffer: CommandBuffer) {
+    beginCommandBufferWithAllocator(command_buffer.buffer, command_buffer.allocator);
+}
+
 submit_command_buffers :: (command_queue: CommandQueue, command_buffers: .. CommandBuffer) {
-    //MTL4CommandQueue.commit(command_queue, command_buffers.data, command_buffers.count);
-    //for command_buffers  MTLCommandBuffer.commit(it);
+    _buffers := NewArray(command_buffers.count, *MTL4CommandBuffer);
+    defer array_free(_buffers);
+    for command_buffers _buffers[it_index] = it.buffer;
+
+    commit(command_queue, _buffers.data, xx _buffers.count);
+
+    // NOTE: we may get a performance boost by reusing the allocators
+    // but we need to set up and manage fences for that first
+    //for command_buffers  return_command_allocator_to_pool(it.allocator);
+    for command_buffers {
+        release(it.allocator);
+        release(it.buffer);
+    }
 }
 
 get_next_swapchain_image :: () -> *CAMetalDrawable {
@@ -97,8 +106,18 @@ get_swapchain_texture :: (swapchain_image: *CAMetalDrawable) -> *MTLTexture {
     return xx CAMetalDrawable.texture(swapchain_image);
 }
 
-present_swapchain_image :: (command_buffer: *MTLCommandBuffer, swapchain_image: *CAMetalDrawable) {
-    MTLCommandBuffer.presentDrawable(command_buffer, xx swapchain_image);
+await_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMetalDrawable) {
+    //MTLCommandBuffer.presentDrawable(command_buffer, xx swapchain_image);
+    waitForDrawable(command_queue, swapchain_image);
+}
+
+present_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMetalDrawable) {
+    //MTLCommandBuffer.presentDrawable(command_buffer, xx swapchain_image);
+    signalDrawable(command_queue, swapchain_image);
+    CAMetalDrawable.present(swapchain_image);
+
+    // NOTE: We'll test it without releasing since it's technically safe to do
+    //release(swapchain_image); 
 }
 
 // the actual Aaltonen api has allocation go like this: 
@@ -107,6 +126,7 @@ present_swapchain_image :: (command_buffer: *MTLCommandBuffer, swapchain_image: 
 // but host to device pointer seems a bit silly and returning the struct just seems better
 // this may change when we have to do the vulkan implementation.
 // TODO: enforce 16 byte alignment here
+// TODO: change to use Metal Heap
 gpu_alloc :: (size: int, memory: Memory) -> Allocation {
     resource_options := ifx memory == .GPU then MTLResourceStorageModePrivate else MTLResourceStorageModeShared;
 
@@ -199,11 +219,15 @@ free_pipeline_state :: (pipeline: *Pipeline) {
 
 set_pipeline :: (command_buffer: CommandBuffer, pipeline: Pipeline) {
     if pipeline.kind == .Graphics || pipeline.kind == .GraphicsMeshlet {
-        assert(active_encoder_kind == .Render);
-        MTLRenderCommandEncoder.setRenderPipelineState(xx active_encoder, xx pipeline.graphics.pipeline);
+        assert(command_buffer.active_encoder_kind == .Render);
+        render_encoder := cast(*MTL4RenderCommandEncoder, command_buffer.active_encoder);
+
+        setRenderPipelineState(render_encoder, xx pipeline.graphics.pipeline);
+
         cull_mode := convert_cull(pipeline.graphics.descriptor.cull);
-        MTLRenderCommandEncoder.setCullMode(xx active_encoder, cull_mode);
-        active_pipeline = pipeline;
+        setCullMode(render_encoder, cull_mode);
+
+        command_buffer.active_pipeline = pipeline;
     }
 }
 
@@ -270,16 +294,14 @@ free_depth_stencil_state :: (depth_stencil_state: *DepthStencilState) {
 
 set_depth_stencil_state :: (command_buffer: CommandBuffer, depth_stencil_state: DepthStencilState) {
     using MTLRenderCommandEncoder;
-    setDepthStencilState(xx active_encoder, xx depth_stencil_state.state);
-    setDepthBias_slopeScale_clamp(xx active_encoder, depth_stencil_state.descriptor.depth_bias, depth_stencil_state.descriptor.depth_bias_slope_factor, depth_stencil_state.descriptor.depth_bias_clamp);
-    //setStencilFrontReferenceValue(xx active_encoder, depth_stencil_state.descriptor.front.reference);
-    //setStencilBackReferenceValue(xx active_encoder, depth_stencil_state.descriptor.back.reference);
-    setStencilFrontReferenceValue_backReferenceValue(xx active_encoder, depth_stencil_state.descriptor.stencil_front.reference, depth_stencil_state.descriptor.stencil_back.reference);
+    setDepthStencilState(xx command_buffer.active_encoder, xx depth_stencil_state.state);
+    setDepthBias_slopeScale_clamp(xx command_buffer.active_encoder, depth_stencil_state.descriptor.depth_bias, depth_stencil_state.descriptor.depth_bias_slope_factor, depth_stencil_state.descriptor.depth_bias_clamp);
+    setStencilFrontReferenceValue_backReferenceValue(xx command_buffer.active_encoder, depth_stencil_state.descriptor.stencil_front.reference, depth_stencil_state.descriptor.stencil_back.reference);
 }
 
 draw_indexed :: (command_buffer: CommandBuffer, vertex_data: *void, pixel_data: *void, indices: *void, index_count: int){
-    assert(active_pipeline.kind == .Graphics || active_pipeline.kind == .GraphicsMeshlet);
-    primitive_type := convert_topology_to_primitive(active_pipeline.graphics.descriptor.topology);
+    assert(command_buffer.active_pipeline.kind == .Graphics || command_buffer.active_pipeline.kind == .GraphicsMeshlet);
+    primitive_type := convert_topology_to_primitive(command_buffer.active_pipeline.graphics.descriptor.topology);
     // TODO: write MTL4 command encoder implementation and MTL4 Command Buffer Implementation
     // so you can actually write a damned draw call
 }
@@ -347,17 +369,30 @@ if topology == {
     }
 }
 
+get_command_allocator_from_pool :: () -> *MTL4CommandAllocator {
+    if command_allocators.count > 0 {
+        last_index := command_allocators.count -1;
+        allocator := command_allocators[last_index];
+        array_ordered_remove_by_index(*command_allocators, last_index);
+        reset(allocator);
+        return allocator;
+    } else {
+        return MTLDevice.newCommandAllocator(device);
+    }
+}
+
+return_command_allocator_to_pool :: (allocator: *MTL4CommandAllocator) {
+    array_add(*command_allocators, allocator);
+}
 
 the_swapchain : *CAMetalLayer;
 device : *MTLDevice;
 arc_pool: *NSAutoreleasePool;
-active_encoder: *MTLCommandEncoder;
-active_encoder_kind: Encoder_Kind;
-active_pipeline: Pipeline;
 allocations: Table(*void, *MTLBuffer);
+command_allocators: [..]*MTL4CommandAllocator;
 
 #import "Objective_C";
 #import "Objective_C/AppKit";
 #import "Objective_C/LightweightRenderingView";
-#import "Metal";
+#import "Metal"(DEBUG_PRINT_GENERATED_CODE = #exists(DEBUG_PRINT_GENERATED_CODE));
 #import "Hash_Table";

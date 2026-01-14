@@ -51,10 +51,13 @@ render_frame :: () {
 
     command_buffer := get_command_buffer(command_queue);
 
+
+    start_command_recording(command_buffer);
     begin_render_pass(command_buffer, render_pass_desc);
     end_render_pass(command_buffer);
-    present_swapchain_image(command_buffer, swapchain_image);
+    await_swapchain_image(command_queue, swapchain_image);
     submit_command_buffers(command_queue, command_buffer);
+    present_swapchain_image(command_queue, swapchain_image);
     
 }
 

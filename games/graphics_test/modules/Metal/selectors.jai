@@ -4,6 +4,7 @@ __macro_generated_selectors_t :: struct #type_info_no_size_complaint {
     // stuff in Metal.jai
     newMTL4CommandQueue: *void = ---;
     newCommandBuffer: *void = ---;
+    newCommandAllocator: *void = ---;
     present: *void = ---;
 
     //MTL4CommandQueue
@@ -14,10 +15,15 @@ __macro_generated_selectors_t :: struct #type_info_no_size_complaint {
     //MTL4CommandBuffer
     renderCommandEncoderWithDescriptor_ : *void = ---;
     renderCommandEncoderWithDescriptor_options_ : *void = ---;
+    beginCommandBufferWithAllocator_ : *void = ---;
+
+    //MTL4CommandAllocator
+    reset : *void = ---;
 
     //MTL4RenderCommandEncoder
     endEncoding : *void = ---;
-    setRenderPipelineState : *void = ---;
+    setRenderPipelineState_ : *void = ---;
+    setCullMode_ : *void = ---;
     colorAttachments : *void = ---;
 
     Placeholder : *void = ---;

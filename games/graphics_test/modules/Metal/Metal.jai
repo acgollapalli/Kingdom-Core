@@ -1865,6 +1865,12 @@ MTLDevice :: struct {
         return _func(self, __macro_generated_selectors.newCommandBuffer);
     }
 
+    newCommandAllocator :: (self: *MTLDevice) -> *MTL4CommandAllocator {
+        _func: (obj: *void, selector: *void) -> *MTL4CommandAllocator #c_call;
+        _func = xx objc_msgSend;
+        return _func(self, __macro_generated_selectors.newCommandAllocator);
+    }
+
     /* Regular Metal Implementation begins here */
     newCommandQueue :: (self: *MTLDevice) -> *MTLCommandQueue {
         _func: (obj: *void, selector: *void) -> *MTLCommandQueue #c_call;

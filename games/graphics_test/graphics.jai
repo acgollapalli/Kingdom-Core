@@ -2,11 +2,24 @@
 #if OS == .MACOS {
     TextureHandle :: *MTLTexture;
     CommandQueue :: *MTL4CommandQueue;
-    CommandBuffer :: *MTL4CommandBuffer;
-    RenderPass :: *MTLRenderPassDescriptor;
+
+    RenderPass :: *MTL4RenderPassDescriptor;
     Shader :: *MTLFunction;
     RenderPipeline :: *MTLRenderPipelineState;
-    _DepthStencilState :: *MTLDepthStencilState;
+
+    CommandBuffer :: *CommandBuffer_;
+    CommandBuffer_ :: struct {
+        buffer : *MTL4CommandBuffer;
+        allocator : *MTL4CommandAllocator;
+        active_encoder : *MTL4CommandEncoder;
+        active_encoder_kind: Encoder_Kind;
+        active_pipeline: Pipeline;
+    }
+
+    DepthStencilState :: struct {
+        descriptor: DepthStencilDescriptor;
+        state: *MTLDepthStencilState;
+    }
 }
 
 RenderPassDescriptor :: struct {
@@ -297,10 +310,6 @@ DepthStencilDescriptor :: struct {
     stencil_back: Stencil;
 }
 
-DepthStencilState :: struct {
-    descriptor: DepthStencilDescriptor;
-    state: _DepthStencilState;
-}
 
 RasterDescriptor :: struct {
     topology: Topology;

@@ -1,0 +1,47 @@
+# Interactive Hyper-Media Protocol
+
+The Interactive Hyper-Media Protocol (IAHP) is a protocol for interlinked interactive programs.
+
+## Basic Structure
+
+There are two main actors in the IAHP: the client and the server. A client may be connected to
+multiple servers at once, however only one server will be regarded as the main server, and that
+server's guest program will be main program displayed on the screen.
+
+Guest programs are WASM64 bundles (.wasm files). These files will have other resources made available
+to them via guest-side apis, provided by the IAHP Client.
+
+The client opens a connection to the server, and opens a unidirectional stream. The client sends
+an Initial message, containing a credential (if a credential has been issued, or otherwise received)
+and a manifest. On this same stream, the server will send an initial message with a credential
+(if the client expects one) and a manifest. The client manifest MAY be empty or it may refer to a
+single player data object. The server manifest MUST include at least one Bundle asset.  
+
+The server MAY send additional Initial messages. However, the first Initial message MUST include a
+wasm bundle. The wasm bundle MAY have dependencies from other assets also included in the manifest,
+and the efficient handling of those dependencies is part of the purpose of the protocol. However,
+the guest program included in the bundle  MUST be able to accept a texture parameter, and display
+to that texture parameter even if NONE of the other assets have yet been loaded.  
+
+Servers MUST send only ONE wasm bundle. In the future, there may be provision made for this to
+increase, however, currently only one wasm bundle is allowed per connection.
+
+## API for Guests
+
+### Basic Conventions:
+
++ All structs which pass between wasm guest and host apis are packed.
++ All struct members should be ordered as described below.  
++ ints are 64 bit as this is suitable for array sizes.  
++ floats are 32 bit.
++ timestamps are 128 bit Apollo Time
+
+Many of these conventions exist because they are the Jai defaults, just as many other conventions in
+computing exist because they are the C default. But... they do make sense. ints should be size_t, and
+floats should be what graphics apis expect. Timestamps should be big enough that we don't have to worry
+about them not being too big.
+
+Structs are packed because it gets around mismatches of struct alignment between host and guest.
+Struct member order is fixed so that host runtimes and guest runtimes both know what they are working with.
+
+## Client Server Messages

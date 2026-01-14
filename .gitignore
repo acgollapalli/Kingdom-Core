@@ -1,0 +1,17 @@
+scratch.jai
+.build/
+*.exe
+/cert_hash.txt
+*.pdb
+*.dSYM/
+.DS_Store
+*.cert
+*.key
+
+main
+*_test
+client
+server
+generate
+build
+_test

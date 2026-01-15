@@ -4,7 +4,7 @@
     CommandQueue :: *MTL4CommandQueue;
 
     RenderPass :: *MTL4RenderPassDescriptor;
-    Shader :: *MTLFunction;
+    ShaderIR :: *MTLFunction;
     RenderPipeline :: *MTLRenderPipelineState;
 
     CommandBuffer :: *CommandBuffer_;
@@ -32,6 +32,8 @@ RenderPassDescriptor :: struct {
     depth_attachment : void;
     stencil_attachment : void;
 }
+
+ShaderSource :: string;
 
 // enum OP { OP_NEVER, OP_LESS, OP_EQUAL, OP_LESS_EQUAL, OP_GREATER, OP_NOT_EQUAL, OP_GREATER_EQUAL, OP_ALWAYS };
 
@@ -95,6 +97,7 @@ Pipeline :: union kind: PipelineType {
 Allocation :: struct {
     cpu: *void;
     gpu: *void;
+    size: u64;
 }
 
 Memory :: enum int {

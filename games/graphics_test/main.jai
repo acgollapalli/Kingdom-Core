@@ -40,8 +40,6 @@ handle_input :: () -> should_quit: bool {
 }
 
 render_frame :: () {
-    clear_color.red = ifx clear_color.red > 1.0 then cast(float64)0.0 else clear_color.red + 0.01;
-
     swapchain_image := get_next_swapchain_image();
     swapchain_texture := get_swapchain_texture(swapchain_image);
 
@@ -49,21 +47,20 @@ render_frame :: () {
        color_attachments = .[{ texture = swapchain_texture, load_op = .Clear, clear_color = clear_color }]
     };
 
-    command_buffer := get_command_buffer(command_queue);
 
+    command_buffer := start_command_recording(command_queue);
 
-    start_command_recording(command_buffer);
     begin_render_pass(command_buffer, render_pass_desc);
     end_render_pass(command_buffer);
-    await_swapchain_image(command_queue, swapchain_image);
+    //await_swapchain_image(command_queue, swapchain_image);
     submit_command_buffers(command_queue, command_buffer);
     present_swapchain_image(command_queue, swapchain_image);
     
 }
 
 on_frame :: () -> should_quit: bool {
-    should_quit := handle_input();
     render_frame();
+    should_quit := handle_input();
    
     return should_quit;
 }

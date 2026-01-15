@@ -71,15 +71,14 @@ get_command_queue :: () -> CommandQueue {
     return MTLDevice.newMTL4CommandQueue(device);
 }
 
-get_command_buffer :: (command_queue: CommandQueue) -> CommandBuffer {
+start_command_recording :: (command_queue: CommandQueue) -> CommandBuffer {
     command_buffer := New(CommandBuffer_);
     command_buffer.buffer = MTLDevice.newCommandBuffer(device);
     command_buffer.allocator = get_command_allocator_from_pool();
-    return command_buffer;
-}
 
-start_command_recording :: (command_buffer: CommandBuffer) {
     beginCommandBufferWithAllocator(command_buffer.buffer, command_buffer.allocator);
+
+    return command_buffer;
 }
 
 submit_command_buffers :: (command_queue: CommandQueue, command_buffers: .. CommandBuffer) {
@@ -106,11 +105,14 @@ get_swapchain_texture :: (swapchain_image: *CAMetalDrawable) -> *MTLTexture {
     return xx CAMetalDrawable.texture(swapchain_image);
 }
 
-await_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMetalDrawable) {
-    //MTLCommandBuffer.presentDrawable(command_buffer, xx swapchain_image);
-    waitForDrawable(command_queue, swapchain_image);
-}
+// NOTE: Since we're acquiring our swapchain image from CAMetalLayer.nextDrawable(),
+// we probably don't actually need this. It's unnecessary clutter
+//await_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMetalDrawable) {
+//    //MTLCommandBuffer.presentDrawable(command_buffer, xx swapchain_image);
+//    waitForDrawable(command_queue, swapchain_image);
+//}
 
+// NOTE: We could probably just merge these two together with submit_command_buffers
 present_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMetalDrawable) {
     //MTLCommandBuffer.presentDrawable(command_buffer, xx swapchain_image);
     signalDrawable(command_queue, swapchain_image);
@@ -152,19 +154,26 @@ gpu_free :: (address: *void) {
     table_remove(*allocations, address);
 }
 
-create_graphics_pipeline :: (vertex_shader: Shader, pixel_shader: Shader, raster_descriptor: RasterDescriptor) -> Pipeline {
+// NOTE: vertex_shader and pixel_shader are the IR of the Slang Shading Language.
+// This means that if you want to pass shaders to this procedure, then you need 
+// to compile them using the compile_to_slang_ir in shader_compiler.jai (in modules).
+// If you only want to use this api to target native code, then you can very easily
+// refactor it to take the native IR of the platform so that you can go directly from
+// your shader source directly to the metallib.
+create_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_descriptor: RasterDescriptor) -> Pipeline {
     descriptor := objc_new(MTLRenderPipelineDescriptor);
     defer release(descriptor);
 
-    MTLRenderPipelineDescriptor.setVertexFunction(descriptor, xx vertex_shader);
-    MTLRenderPipelineDescriptor.setFragmentFunction(descriptor, xx pixel_shader);
+    vertex_fn := make_metal_function(vertex_shader);
+    pixel_fn := make_metal_function(pixel_shader);
+    MTLRenderPipelineDescriptor.setVertexFunction(descriptor, xx vertex_fn);
+    MTLRenderPipelineDescriptor.setFragmentFunction(descriptor, xx pixel_fn);
 
     // Not sure this is necessary. Seems like draw primitives should handle it.
     topology := convert_primitive_topology(raster_descriptor.topology); 
-    
     MTLRenderPipelineDescriptor.setInputPrimitiveTopology(descriptor, topology);
-    // NOTE: Topology in the way that Aaltonen has it is set on the draw command, I think
-    // the topology setting on the pipeline is for layered rendering. 
+    // NOTE: Topology in the way that Aaltonen has it is set on the draw command in metal, 
+    // I think the topology setting on the pipeline is for layered rendering. 
     // I'm honestly not even sure that this matters...
 
     // cull is set on the encoder
@@ -385,14 +394,41 @@ return_command_allocator_to_pool :: (allocator: *MTL4CommandAllocator) {
     array_add(*command_allocators, allocator);
 }
 
+/* from <dispatch/dispatch.h>
+dispatch_data_t
+dispatch_data_create(const void *buffer,
+	size_t size,
+	dispatch_queue_t _Nullable queue,
+	dispatch_block_t _Nullable destructor);*/
+dispatch_data_create :: (buffer: *void, size: u64, queue: dispatch_queue_t, block: dispatch_block_t) -> dispatch_data_t #foreign libSystem;
+
+
+make_metal_function :: (slang_ir: []u8) -> *MTLFunction {
+    metal_lib_data := compile_slang_ir_to_platform(slang_ir);
+    dispatch_data := dispatch_data_create(slang_ir.data, xx slang_ir.count, null, null);
+    metal_lib := MTLDevice.newLibraryWithData_error(device, dispatch_data, null); // WARNING: I should really stop leaving these NSError pointers as null. It's gonna bite me in the rear at some point.
+
+    apple_string := NSString.getTempString("main");
+    fn := MTLLibrary.newFunctionWithName(metal_lib, apple_string);
+    metal_fn := cast(*MTLFunction, fn);
+
+    return metal_fn;
+}
+
 the_swapchain : *CAMetalLayer;
 device : *MTLDevice;
 arc_pool: *NSAutoreleasePool;
 allocations: Table(*void, *MTLBuffer);
 command_allocators: [..]*MTL4CommandAllocator;
 
+#import "shader_compiler";
+
 #import "Objective_C";
 #import "Objective_C/AppKit";
 #import "Objective_C/LightweightRenderingView";
 #import "Metal"(DEBUG_PRINT_GENERATED_CODE = #exists(DEBUG_PRINT_GENERATED_CODE));
 #import "Hash_Table";
+#import "macos";
+
+libSystem :: #library,system "libSystem";
+dispatch_block_t :: *NSObject;

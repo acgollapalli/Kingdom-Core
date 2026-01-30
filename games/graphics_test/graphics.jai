@@ -1,9 +1,12 @@
+WINDOW_WIDTH :: 1280;
+WINDOW_HEIGHT :: 720;
 
 #if OS == .MACOS {
     TextureHandle :: *MTLTexture;
+    TextureViewHandle :: *MTLTexture;
     CommandQueue :: *MTL4CommandQueue;
 
-    RenderPass :: *MTL4RenderPassDescriptor;
+    RenderPass :: *MTLRenderPassDescriptor;
     ShaderIR :: *MTLFunction;
     RenderPipeline :: *MTLRenderPipelineState;
 
@@ -14,30 +17,48 @@
         active_encoder : *MTL4CommandEncoder;
         active_encoder_kind: Encoder_Kind;
         active_pipeline: Pipeline;
+        vertex_argument_table: *MTL4ArgumentTable;
+        pixel_argument_table: *MTL4ArgumentTable;
+        compute_argument_table: *MTL4ArgumentTable;
     }
 
-    DepthStencilState :: struct {
+    DepthStencilState_ :: struct {
         descriptor: DepthStencilDescriptor;
         state: *MTLDepthStencilState;
     }
+    DepthStencilState :: *DepthStencilState_;
+
+    Pipeline :: *Pipeline_;
 }
 
+// TODO: rename these from attachment to target
 RenderPassDescriptor :: struct {
-    color_attachments : [] struct {
+    color_targets : [] struct {
         texture: TextureHandle;
         load_op: LoadOp = .Load;
         store_op: StoreOp = .Store;
         clear_color: ClearColor = .{ 0.0, 0.0, 0.0, 0.0 };
     };
-    depth_attachment : void;
-    stencil_attachment : void;
+    depth_target : struct {
+        texture: TextureHandle;
+        load_op: LoadOp = .Clear;
+        store_op: StoreOp = .Dont_Care;
+        clear_value: float64 = 1.0;
+    };
+    stencil_target : struct {
+        texture: TextureHandle;
+        load_op: LoadOp = .Clear;
+        store_op: StoreOp = .Dont_Care;
+        clear_value: u32 = 0;
+    };
 }
+
 
 ShaderSource :: string;
 
 // enum OP { OP_NEVER, OP_LESS, OP_EQUAL, OP_LESS_EQUAL, OP_GREATER, OP_NOT_EQUAL, OP_GREATER_EQUAL, OP_ALWAYS };
 
-Op :: enum {
+Op :: enum u32 {
     Never :: 0;
     Less :: 1;
     Equal :: 2;
@@ -57,13 +78,13 @@ Op :: enum {
     DecrementWrap :: 7;
 }
 
-LoadOp :: enum {
+LoadOp :: enum u32 {
     Dont_Care :: 0;
     Load :: 1;
     Clear :: 2;
 }
 
-StoreOp :: enum {
+StoreOp :: enum u32 {
     Dont_Care :: 0;
     Store :: 1;
     Multisample_Resolve :: 2;
@@ -79,13 +100,13 @@ ClearColor :: struct {
     alpha: float64;
 }
 
-PipelineType :: enum int {
+PipelineType :: enum u32 {
     Compute;
     Graphics;
     GraphicsMeshlet;
 }
 
-Pipeline :: union kind: PipelineType {
+Pipeline_ :: union kind: PipelineType {
     compute: struct {};
     graphics: struct{
         descriptor: RasterDescriptor;
@@ -100,14 +121,14 @@ Allocation :: struct {
     size: u64;
 }
 
-Memory :: enum int {
+Memory :: enum u32 {
     Default;
     GPU;
     Readback;
 }
 
 // enum TOPOLOGY { TOPOLOGY_TRIANGLE_LIST, TOPOLOGY_TRIANGLE_STRIP, TOPOLOGY_TRIANGLE_FAN };
-Topology :: enum int {
+Topology :: enum u32 {
     None;
     Triangle;
     Line;
@@ -118,7 +139,7 @@ Topology :: enum int {
 }
 
 // enum CULL { CULL_CCW, CULL_CW, CULL_ALL, CULL_NONE };
-Cull :: enum int {
+Cull :: enum u32 {
     CCW;
     CW;
     All; // why is cull all a thing?
@@ -126,7 +147,7 @@ Cull :: enum int {
 }
 
 // enum FORMAT { FORMAT_NONE, FORMAT_RGBA8_UNORM, FORMAT_D32_FLOAT, FORMAT_RG11B10_FLOAT, FORMAT_RGB10_A2_UNORM, ... };
-Format :: enum int {
+Format :: enum u32 {
     None;
     A8_Unorm :: 1;
     R8_Unorm :: 10;
@@ -254,22 +275,32 @@ Format :: enum int {
     X24_Stencil8 :: 262;
 }
 
+//enum USAGE_FLAGS { USAGE_SAMPLED, USAGE_STORAGE, USAGE_COLOR_ATTACHMENT, USAGE_DEPTH_STENCIL_ATTACHMENT, ... };
+UsageFlags :: enum_flags u32 {
+    None :: 0x00;
+    Sampled :: 0x01;
+    Storage :: 0x02;
+    ColorAttachment :: 0x04;
+    DepthStencilAttachment :: 0x08;
+}
+
 // enum BLEND { BLEND_ADD, BLEND_SUBTRACT, BLEND_REV_SUBTRACT, BLEND_MIN, BLEND_MAX };
-Blend :: enum u8 {
-    Add;
-    Subtract;
-    Rev_Subtract;
-    Min;
-    Max;
+Blend :: enum u32 {
+    Add :: 0;
+    Subtract :: 1;
+    Rev_Subtract :: 2;
+    Min :: 3;
+    Max :: 4;
 }
 
 // enum FACTOR { FACTOR_ZERO, FACTOR_ONE, FACTOR_SRC_COLOR, FACTOR_DST_COLOR, FACTOR_SRC_ALPHA, ... };
-Factor :: enum int {
-    Zero;
-    One;
-    Src_Color;
-    Dst_Color;
-    Src_Alpha;
+Factor :: enum u32 {
+    Zero :: 0;
+    One :: 1;
+    Src_Color :: 2;
+    Dst_Color :: 6;
+    Src_Alpha :: 4;
+    Dst_Alpha :: 8;
     // TODO: Actually get these to be the appropriate ones for metal and vulkan
 }
 
@@ -279,16 +310,17 @@ ColorTarget :: struct {
 }
 
 BlendDescriptor :: struct {
-    color_op: Blend;
-    src_color_factor: Factor;
-    dst_color_factor: Factor;
-    alpha_op: Blend;
-    src_alpha_factor: Factor;
-    dst_alpha_factor: Factor;
-    // color_write_mask: u8; // I think this is redundant
+    color_op := Blend.Add;
+    src_color_factor := Factor.One;
+    dst_color_factor := Factor.Zero;
+    alpha_op := Blend.Add;
+    src_alpha_factor := Factor.One;
+    dst_alpha_factor := Factor.Zero;
+    color_write_mask: u8; // I think this is redundant
 }
 
-DepthFlags :: enum_flags u8 {
+DepthFlags :: enum_flags u32 {
+    None :: 0x00;
     Read :: 0x01;
     Write :: 0x02;
 }
@@ -315,7 +347,7 @@ DepthStencilDescriptor :: struct {
 
 
 RasterDescriptor :: struct {
-    topology: Topology;
+    topology: Topology = .Triangle;
     cull: Cull;
     alpha_to_coverage := false;
     support_dual_source_blending := false;
@@ -325,3 +357,39 @@ RasterDescriptor :: struct {
     color_targets: []ColorTarget; // we may have to change this to our own array struct to cross the wasm barrier
     blend_descriptor: *BlendDescriptor; // nullable, so it's a pointer
 }
+
+TextureSizeAlign :: struct {
+    size: u64;
+    align: u64;
+}
+
+// NOTE: TextureHandle and TextureDescriptorHandle are platform dependent.
+// This is because we're basicaly implementing this on top of metal and vulkan
+// so unfortunately, this is how it has to be.
+//TextureDescriptorHandle :: struct 
+
+Texture ::enum u32 { 
+    Texture_1D :: 0; 
+    Texture_2D :: 1; 
+    Texture_3D :: 2; 
+    Texture_Cube :: 3; 
+    Texture_2D_Array :: 4; 
+    Texture_Cube_Array :: 5;
+}
+
+TextureDescriptor :: struct { 
+    type := Texture.Texture_2D;
+    dimensions : struct {
+        width: u32;
+        height: u32;
+        depth: u32;
+    };
+    mipCount : u32 = 1;
+    layerCount : u32 = 1;
+    sampleCount : u32 = 1;
+    format := Format.None; 
+    usage := UsageFlags.None;
+};
+#assert(size_of(TextureDescriptor) == 36);
+
+

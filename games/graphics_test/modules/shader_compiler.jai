@@ -7,7 +7,7 @@ compile_shader :: (shader_path: string, output_directory: string = "", debug_sym
 
     auto_release_temp();
 
-    filename := shader_path;
+    filename := path_filename(shader_path);
     source_dir := path_strip_filename(shader_path);
 
     options := get_platform_options(debug_symbols);
@@ -70,7 +70,7 @@ compile_to_slang_ir :: (shader_path: string, output_directory: string = "", debu
 
     auto_release_temp();
 
-    filename := shader_path;
+    filename := path_filename(shader_path);
     source_dir := path_strip_filename(shader_path);
 
     options := get_platform_options(debug_symbols);
@@ -84,20 +84,20 @@ compile_to_slang_ir :: (shader_path: string, output_directory: string = "", debu
     if diagnostic_blob then log_diagnostic_blob(diagnostic_blob);
     if !slang_module then return false, .{};
 
-    slang_code : *slang.IBlob;
-    slang.IModule_serialize(slang_module, *serialized_blob);
-    if !serialized_blob then return false, .{};
+    slang_ir : *slang.IBlob;
+    slang.IModule_serialize(slang_module, *slang_ir);
+    if !slang_ir then return false, .{};
 
-    slang_code_raw: [] u8 = NewArray(xx slang.ISlangBlob_getBufferSize(slang_code), u8);
+    slang_ir_raw: [] u8 = NewArray(xx slang.ISlangBlob_getBufferSize(slang_ir), u8);
 
-    memcpy(slang_code_raw.data, slang.ISlangBlob_getBufferPointer(slang_code), slang_code_raw.count);
+    memcpy(slang_ir_raw.data, slang.ISlangBlob_getBufferPointer(slang_ir), slang_ir_raw.count);
 
-    slang.ISlangUnknown_release(slang_code);
+    slang.ISlangUnknown_release(slang_ir);
 
     if output_directory {
         output_path := tprint("%/%.%", output_directory, path_strip_extension(filename), "slv");
 
-        write_entire_file(output_path, slang_code_raw.data, slang_code_raw.count);
+        write_entire_file(output_path, slang_ir_raw.data, slang_ir_raw.count);
     }
 
     return true, slang_ir_raw;
@@ -121,6 +121,8 @@ compile_slang_ir_to_platform :: (slang_ir: []u8, output_directory: string = "", 
     compiler_version : *u8;
     module_name : *u8;
     slang.ISession_loadModuleInfoFromIRBlob(session, slang_code, *module_version, *compiler_version, *module_name);
+    log("loading slang module: %, version: %, from compiler_version: %", to_string(module_name), module_version, to_string(compiler_version));
+
     slang_module := slang.ISession_loadModuleFromIRBlob(session, module_name, null, slang_code, *diagnostic_blob); 
     if diagnostic_blob then log_diagnostic_blob(diagnostic_blob);
     if !slang_module then return false, .{};
@@ -300,7 +302,7 @@ get_session :: (options: []slang.CompilerOptionEntry, target_desc: slang.TargetD
         targetCount = 1,
         defaultMatrixLayoutMode = .ROW_MAJOR,
         searchPaths = search_paths_c.data,
-        searchPathCount = 1,
+        searchPathCount = search_paths_c.count,
         compilerOptionEntries = options.data,
         compilerOptionEntryCount = xx options.count,
     };

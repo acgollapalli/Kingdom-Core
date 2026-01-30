@@ -9,9 +9,8 @@ scratch.jai
 *.key
 
 main
-*_test
+#*_test
 client
 server
 generate
 build
-_test

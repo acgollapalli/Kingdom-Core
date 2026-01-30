@@ -562,6 +562,7 @@ MTLResource :: struct {
 }
 
 MTLBuffer :: struct {
+    using #as base: MTLResource;
     using MTLResourceUsage;
 
     contents :: (self: *MTLBuffer) -> *void {
@@ -1871,6 +1872,33 @@ MTLDevice :: struct {
         return _func(self, __macro_generated_selectors.newCommandAllocator);
     }
 
+    newArgumentTableWithDescriptor_error :: (self: *MTLDevice, descriptor: *MTL4ArgumentTableDescriptor, error: **NSError) -> *MTL4ArgumentTable {
+        _func: (obj: *void, selector: *void, descriptor: *MTL4ArgumentTableDescriptor, error: **NSError) -> *MTL4ArgumentTable #c_call;
+        _func = xx objc_msgSend;
+        return _func(self, __macro_generated_selectors.newArgumentTableWithDescriptor_error_, descriptor, error);
+    }
+
+    newResidencySetWithDescriptor :: (self: *MTLDevice,  descriptor: *MTLResidencySetDescriptor, error: **NSError) -> *MTLResidencySet {
+        _func: (obj: *void, selector: *void, descriptor: *MTLResidencySetDescriptor, error: **NSError) -> *MTLResidencySet #c_call;
+        _func = xx objc_msgSend;
+        return _func(self, __macro_generated_selectors.newResidencySetWithDescriptor_error_, descriptor, error);
+    }
+
+    newPipelineDataSetSerializerWithDescriptor :: (self: *MTLDevice,  descriptor: *MTL4PipelineDataSetSerializerDescriptor) -> *MTL4PipelineDataSetSerializer {
+        _func: (obj: *void, selector: *void, descriptor: *MTL4PipelineDataSetSerializerDescriptor) -> *MTL4PipelineDataSetSerializer #c_call;
+        _func = xx objc_msgSend;
+        return _func(self, __macro_generated_selectors.newPipelineDataSetSerializerWithDescriptor_, descriptor);
+    }
+
+    newCompilerWithDescriptor :: (self: *MTLDevice,  descriptor: *MTL4CompilerDescriptor, error: **NSError) -> *MTL4Compiler {
+        _func: (obj: *void, selector: *void, descriptor: *MTL4CompilerDescriptor, error: **NSError) -> *MTL4Compiler #c_call;
+        _func = xx objc_msgSend;
+        return _func(self, __macro_generated_selectors.newCompilerWithDescriptor_error_, descriptor, error);
+    }
+
+
+
+
     /* Regular Metal Implementation begins here */
     newCommandQueue :: (self: *MTLDevice) -> *MTLCommandQueue {
         _func: (obj: *void, selector: *void) -> *MTLCommandQueue #c_call;
@@ -3119,7 +3147,7 @@ using MTLMultisampleDepthResolveFilter :: enum NSUInteger {
 
 
 MTLRenderPassDepthAttachmentDescriptor :: struct {
-    mtlrenderpassattachmentdescriptor: MTLRenderPassAttachmentDescriptor;
+    using #as mtlrenderpassattachmentdescriptor: MTLRenderPassAttachmentDescriptor;
     clearDepth :: (self: *MTLRenderPassDepthAttachmentDescriptor) -> float64 {
         _func: (obj: *void, selector: *void) -> float64 #c_call;
         _func = xx objc_msgSend;
@@ -3154,7 +3182,7 @@ using MTLMultisampleStencilResolveFilter :: enum NSUInteger {
 
 
 MTLRenderPassStencilAttachmentDescriptor :: struct {
-    mtlrenderpassattachmentdescriptor: MTLRenderPassAttachmentDescriptor;
+    using #as mtlrenderpassattachmentdescriptor: MTLRenderPassAttachmentDescriptor;
     clearStencil :: (self: *MTLRenderPassStencilAttachmentDescriptor) -> uint32_t {
         _func: (obj: *void, selector: *void) -> uint32_t #c_call;
         _func = xx objc_msgSend;
@@ -5253,6 +5281,17 @@ MTLHeapDescriptor :: struct {
         _func(self, __selectors.setCpuCacheMode_, cpuCacheMode);
     }
 
+    type :: (self: *MTLHeapDescriptor) -> MTLHeapType {
+        _func: (obj: *void, selector: *void) -> MTLHeapType #c_call;
+        _func = xx objc_msgSend;
+        return _func(self, __selectors.type);
+    }
+
+    setType :: (self: *MTLHeapDescriptor, type: MTLHeapType) -> () {
+        _func: (obj: *void, selector: *void, type: MTLHeapType) -> () #c_call;
+        _func = xx objc_msgSend;
+        _func(self, __selectors.setType_, type);
+    }
 }
 
 MTLHeap :: struct {
@@ -5898,6 +5937,7 @@ _Generated_Selectors :: struct #type_info_no_size_complaint {
     textureDataType: *void = ---;
     isDepthTexture: *void = ---;
     type: *void = ---;
+    setType_: *void = ---;
     index: *void = ---;
     isActive: *void = ---;
     bufferAlignment: *void = ---;

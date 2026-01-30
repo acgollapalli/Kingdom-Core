@@ -8,6 +8,8 @@ init_app :: (title: string) -> Window_Type {
     return the_window;
 }
 
+USE_APPLE_HEAP_ALLOCATION :: true;
+
 #if OS == .MACOS {
     #load "macos.jai";
 }
@@ -22,5 +24,4 @@ the_window: Window_Type;
 #import "Sound_Player";
 #import "Gamepad";
     
-WINDOW_WIDTH :: 1280;
-WINDOW_HEIGHT :: 720;
+

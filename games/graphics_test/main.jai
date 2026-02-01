@@ -18,15 +18,15 @@ main :: () {
     stencil_texture : TextureHandle;
     stencil_texture_format := Format.Stencil8;
     {
-        depth_texture_descriptor := MTLTextureDescriptor.texture2DDescriptorWithPixelFormat_width_height_mipmapped(MTLPixelFormatDepth32Float, WINDOW_WIDTH, WINDOW_HEIGHT, xx false);
+        depth_texture_descriptor := texture2DDescriptor(xx objc_getClass("MTLTextureDescriptor"), .Depth32Float, WINDOW_WIDTH, WINDOW_HEIGHT, xx false);
         autorelease(depth_texture_descriptor);
 
-        depth_texture = xx MTLDevice.newTextureWithDescriptor(device, depth_texture_descriptor);
+        depth_texture = xx newTexture(the_device, depth_texture_descriptor);
 
-        stencil_texture_descriptor := MTLTextureDescriptor.texture2DDescriptorWithPixelFormat_width_height_mipmapped(MTLPixelFormatStencil8, WINDOW_WIDTH, WINDOW_HEIGHT, xx false);
+        stencil_texture_descriptor := texture2DDescriptor(xx objc_getClass("MTLTextureDescriptor"), .Stencil8, WINDOW_WIDTH, WINDOW_HEIGHT, xx false);
         autorelease(stencil_texture_descriptor);
 
-        stencil_texture = xx MTLDevice.newTextureWithDescriptor(device, stencil_texture_descriptor);
+        stencil_texture = xx newTexture(the_device, stencil_texture_descriptor);
     }
 
     command_queue = get_command_queue();

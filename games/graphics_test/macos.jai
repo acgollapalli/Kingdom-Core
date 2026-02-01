@@ -11,7 +11,7 @@
 
 
 init :: () {
-    init_metal();
+    init_mtl();
 
     arc_pool = objc_new(NSAutoreleasePool);
 
@@ -22,13 +22,13 @@ init :: () {
         autorelease(view);
 
         the_swapchain = objc_init(objc_alloc(CAMetalLayer));
-        device = xx MTLCreateSystemDefaultDevice();
-        CAMetalLayer.setDevice(the_swapchain, device);
+        the_device = xx MTLCreateSystemDefaultDevice();
+        setDevice(the_swapchain, the_device);
         //CAMetalLayer.setOpaque(the_swapchain, true); // @TODO: Update the Objective_C Module so that CALayer has the opaque property
 
-        CAMetalLayer.setDrawableSize(the_swapchain, { WINDOW_WIDTH, WINDOW_HEIGHT }); // @TODO: Use convertSizeToBacking instead
-        CAMetalLayer.setFramebufferOnly(the_swapchain, xx true);
-        CAMetalLayer.setPixelFormat(the_swapchain, .MTLPixelFormatBGRA8Unorm_sRGB); // TODO: set up a standard way for users to know from the platform layer what pixel format the swapchain is in. (just saying it's always BGRA8Unorm_sRGB would prevent us from ever supporting HDR in the future)
+        setDrawableSize(the_swapchain, { WINDOW_WIDTH, WINDOW_HEIGHT }); // @TODO: Use convertSizeToBacking instead
+        setFramebufferOnly(the_swapchain, xx true);
+        setPixelFormat(the_swapchain, .MTLPixelFormatBGRA8Unorm_sRGB); // TODO: set up a standard way for users to know from the platform layer what pixel format the swapchain is in. (just saying it's always BGRA8Unorm_sRGB would prevent us from ever supporting HDR in the future)
 
         NSView.setLayer(view, xx the_swapchain);
         assert(NSView.layer(view) == xx the_swapchain);
@@ -60,7 +60,7 @@ init :: () {
     */
     {
         expected_buffers_in_flight := 12;
-        for 0..(expected_buffers_in_flight -1) array_add(*command_allocators, MTLDevice.newCommandAllocator(device));
+        for 0..(expected_buffers_in_flight -1) array_add(*command_allocators, newCommandAllocator(the_device));
         array_reserve(*command_buffers, expected_buffers_in_flight);
         array_reserve(*vertex_argument_tables, expected_buffers_in_flight);
         array_reserve(*pixel_argument_tables, expected_buffers_in_flight);
@@ -72,11 +72,11 @@ init :: () {
         descriptor := objc_new(MTLHeapDescriptor);
         autorelease(descriptor);
 
-        MTLHeapDescriptor.setType(descriptor, .Automatic); // technically the default
-        MTLHeapDescriptor.setStorageMode(descriptor, .MTLStorageModeShared);
-        MTLHeapDescriptor.setSize(descriptor, 1024*1024*512);
+        setType(descriptor, .Automatic); // technically the default
+        setStorageMode(descriptor, .MTLStorageModeShared);
+        setSize(descriptor, 1024*1024*512);
 
-        the_heap = cast( *MTLHeap, MTLDevice.newHeapWithDescriptor(device, descriptor));
+        the_heap = cast( *MTLHeap, newHeap(the_device, descriptor));
     }
 
     // set up residency set so we can just add it on the command queue
@@ -85,7 +85,7 @@ init :: () {
         setInitialCapacity(descriptor, xx 1);
 
         error : *NSError;
-        the_residency_set = MTLDevice.newResidencySetWithDescriptor(device, descriptor, *error);
+        the_residency_set = newResidencySet(the_device, descriptor, *error);
         if !the_residency_set  log_error("Problem creating residency set: %", error);
         assert(the_residency_set != null);
 
@@ -99,16 +99,16 @@ init :: () {
         setConfiguration(pipeline_data_set_serializer_descriptor, .CaptureBinaries | .CaptureDescriptors);
         autorelease(pipeline_data_set_serializer_descriptor);
 
-        pipeline_data_set_serializer := MTLDevice.newPipelineDataSetSerializerWithDescriptor(device, pipeline_data_set_serializer_descriptor);
+        pipeline_data_set_serializer := newPipelineDataSetSerializer(the_device, pipeline_data_set_serializer_descriptor);
 
         compiler_descriptor := objc_new(MTL4CompilerDescriptor);
         setPipelineDataSetSerializer(compiler_descriptor, pipeline_data_set_serializer);
         autorelease(compiler_descriptor);
 
         error: *NSError;
-        compiler = MTLDevice.newCompilerWithDescriptor(device, compiler_descriptor, *error);
-        if !compiler log_error("Problem creating shader compiler: %", error);
-        assert(compiler != null);
+        the_compiler = newCompiler(the_device, compiler_descriptor, *error);
+        if !the_compiler log_error("Problem creating shader compiler: %", error);
+        assert(the_compiler != null);
     }
 }
 
@@ -133,18 +133,17 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
     }
 
     configure_render_pass_attachment :: (attachment: *MTLRenderPassAttachmentDescriptor, texture_handle: TextureHandle, load_op: LoadOp, store_op: StoreOp) {
-        using MTLRenderPassColorAttachmentDescriptor;
         setTexture(attachment, xx texture_handle);
 
         // setLevel(attachment, 0); // mipmap level, this is the default value
         // setSlice(attachment, 0); // texture layer, this is the default value
         // setDepthPlane(attachment, 0); // only applies to 3d textures, this is the default value
 
-        #assert(MTLLoadActionLoad == cast(MTLLoadAction, LoadOp.Load));
+        #assert(MTLLoadAction.Load == cast(MTLLoadAction, LoadOp.Load));
         load_action := cast(MTLLoadAction, load_op);
         setLoadAction(attachment, load_action);
 
-        #assert(MTLStoreActionStore == cast(MTLStoreAction, StoreOp.Store));
+        #assert(MTLStoreAction.Store == cast(MTLStoreAction, StoreOp.Store));
         store_action := cast(MTLStoreAction, store_op);
         setStoreAction(attachment, store_action);
 
@@ -170,7 +169,7 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
     for render_pass_descriptor.color_targets {
         using MTLRenderPassColorAttachmentDescriptor;
 
-        color_attachment := MTLRenderPassColorAttachmentDescriptorArray.objectAtIndexedSubscript(colorAttachments(render_pass), xx it_index);
+        color_attachment := object(colorAttachments(render_pass), xx it_index);
         //autorelease(color_attachment);
 
         configure_render_pass_attachment(color_attachment, it.texture, it.load_op, it.store_op);
@@ -250,7 +249,7 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
         autorelease(command_buffer.active_encoder);
     }
     
-    command_buffer.active_encoder = renderCommandEncoderWithDescriptor(command_buffer.buffer, render_pass);
+    command_buffer.active_encoder = renderCommandEncoder(command_buffer.buffer, render_pass);
 
     command_buffer.active_encoder_kind = .Render;
 
@@ -267,7 +266,7 @@ end_render_pass :: (command_buffer: CommandBuffer) {
 }
 
 get_command_queue :: () -> CommandQueue {
-    command_queue := MTLDevice.newMTL4CommandQueue(device);
+    command_queue := newMTL4CommandQueue(the_device);
     addResidencySet(command_queue, the_residency_set);
 
     return command_queue;
@@ -275,13 +274,13 @@ get_command_queue :: () -> CommandQueue {
 
 start_command_recording :: (command_queue: CommandQueue) -> CommandBuffer {
     command_buffer := New(CommandBuffer_);
-    command_buffer.buffer = MTLDevice.newCommandBuffer(device);
+    command_buffer.buffer = newCommandBuffer(the_device);
     command_buffer.allocator = get_command_allocator_from_pool();
     command_buffer.vertex_argument_table = get_vertex_argument_table();
     command_buffer.pixel_argument_table = get_pixel_argument_table();
     command_buffer.compute_argument_table = get_compute_argument_table();
 
-    beginCommandBufferWithAllocator(command_buffer.buffer, command_buffer.allocator);
+    beginCommandBuffer(command_buffer.buffer, command_buffer.allocator);
 
     return command_buffer;
 }
@@ -321,25 +320,25 @@ submit :: (command_queue: CommandQueue, command_buffers: .. CommandBuffer) {
 }
 
 get_next_swapchain_image :: () -> *CAMetalDrawable {
-    return CAMetalLayer.nextDrawable(the_swapchain);
+    return nextDrawable(the_swapchain);
 }
 
 get_swapchain_texture :: (swapchain_image: *CAMetalDrawable) -> *MTLTexture {
-    return xx CAMetalDrawable.texture(swapchain_image);
+    return texture(swapchain_image);
 }
 
 // NOTE: Since we're acquiring our swapchain image from CAMetalLayer.nextDrawable(),
 // we probably don't actually need this. It's unnecessary clutter
 await_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMetalDrawable) {
     //MTLCommandBuffer.presentDrawable(command_buffer, xx swapchain_image);
-    waitForDrawable(command_queue, swapchain_image);
+    wait(command_queue, swapchain_image);
 }
 
 // NOTE: We could probably just merge these two together with submit_command_buffers
 present_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMetalDrawable) {
     //MTLCommandBuffer.presentDrawable(command_buffer, xx swapchain_image);
     signalDrawable(command_queue, swapchain_image);
-    CAMetalDrawable.present(swapchain_image);
+    present(swapchain_image);
 
     // NOTE: We'll test it without releasing since it's technically safe to do
     //release(swapchain_image); 
@@ -373,26 +372,27 @@ present_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMet
     // TODO: enforce 16 byte alignment here
     gpu_alloc :: (size: int, align: int = 16, memory: Memory = .Default) -> Allocation {
         assert(align == 16, "alloc alignment overload not implemented yet!");
-        resource_options := ifx memory == .GPU then MTLResourceStorageModePrivate else MTLResourceStorageModeShared;
+        resource_options := ifx memory == .GPU then MTLResourceOptions.StorageModePrivate else MTLResourceOptions.StorageModeShared;
 
-        //buffer := MTLDevice.newBufferWithLength_options(device, xx size, resource_options);
-        buffer := MTLHeap.newBufferWithLength_options(the_heap, xx size, resource_options); 
+        //buffer := newBufferWithLength_options(the_device, xx size, resource_options);
+        buffer := newBuffer(the_heap, xx size, resource_options); 
 
         // FIXME: We need to set up individual heaps for different memory types,
         // because we're using the heap for residency set purposes, and the memory
         // type needs to match the heap's storage type. 
         assert(memory == .Default);
 
-        contents := ifx memory != .GPU MTLBuffer.contents(buffer) else null;
-        gpuAddress := MTLBuffer.gpuAddress(buffer);
+        cpu_address := ifx memory != .GPU contents(buffer) else null;
+        gpu_address := gpuAddress(buffer);
 
         // looks like metal autmoatically aligns to 16
-        assert((gpuAddress.(u64) % align.(u64)) == 0); 
-        assert((contents.(u64) % align.(u64)) == 0);
+        assert((gpu_address.(u64) % align.(u64)) == 0); 
+        assert((cpu_address.(u64) % align.(u64)) == 0);
 
-        table_add(*allocations, gpuAddress, buffer);
+        table_add(*allocations, gpu_address.(*void), buffer);
 
-        return { cpu = contents, gpu = gpuAddress, size = xx size };
+        // TODO: fix gpu_address casting
+        return { cpu = cpu_address, gpu = xx gpu_address, size = xx size };
     }
 
     gpu_free :: (address: *void) {
@@ -400,7 +400,7 @@ present_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMet
         assert(found_id, "Attempted to double-free gpu memory at %!\n", address);
 
         cast(*MTLResource, mtl_buffer_id); // MTLBuffer inherits from MTLResource
-        MTLResource.makeAliasable(mtl_buffer_id); // allows the heap memory to be reused
+        makeAliasable(mtl_buffer_id); // allows the heap memory to be reused
         autorelease(mtl_buffer_id);
         table_remove(*allocations, address);
     }
@@ -442,19 +442,19 @@ create_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_des
         color_attachment_descriptor := objc_new(MTL4RenderPipelineColorAttachmentDescriptor);
         autorelease(color_attachment_descriptor); //TODO: once it works, uncomment this
 
-        #assert(MTLPixelFormatEAC_RGBA8_sRGB == cast(MTLPixelFormat, Format.EAC_RGBA8_sRGB));
+        #assert(MTLPixelFormat.EAC_RGBA8_sRGB == cast(MTLPixelFormat, Format.EAC_RGBA8_sRGB));
         pixel_format := cast(MTLPixelFormat, it.format);
         setPixelFormat(color_attachment_descriptor, pixel_format);
 
-        #assert(MTLColorWriteMaskGreen == cast(MTLColorWriteMask, (0x04).(u8))); 
+        #assert(MTLColorWriteMask.Green == cast(MTLColorWriteMask, (0x04).(u8))); 
         write_mask := cast(MTLColorWriteMask, it.write_mask);
         setWriteMask(color_attachment_descriptor, write_mask);
 
         if raster_descriptor.blend_descriptor {
             blend := raster_descriptor.blend_descriptor;
 
-            #assert(MTLBlendOperationReverseSubtract == cast(MTLBlendOperation, Blend.Rev_Subtract));
-            #assert(MTLBlendFactorSourceAlpha == cast(MTLBlendFactor, Factor.Src_Alpha));
+            #assert(MTLBlendOperation.ReverseSubtract == cast(MTLBlendOperation, Blend.Rev_Subtract));
+            #assert(MTLBlendFactor.SourceAlpha == cast(MTLBlendFactor, Factor.Src_Alpha));
 
             setBlendingState(color_attachment_descriptor, .Enabled);
 
@@ -489,7 +489,7 @@ create_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_des
     //setFragmentStaticLinkingDescriptor(pipeline_descriptor, ...);
 
     topology_class := convert_primitive_topology(raster_descriptor.topology);
-    assert(topology_class == MTLPrimitiveTopologyClassTriangle); // FIXME: only for testing
+    assert(topology_class == MTLPrimitiveTopologyClass.Triangle); // FIXME: only for testing
     setInputPrimitiveTopology(pipeline_descriptor, topology_class);
 
     #assert(1 == cast(BOOL, true));
@@ -527,7 +527,7 @@ create_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_des
     // NOTE: we can add archives here that are precompiled shaders
 
     error : *NSError;
-    pipeline_state := newRenderPipelineStateWithDescriptor(compiler, pipeline_descriptor, compiler_task_options, *error);
+    pipeline_state := newRenderPipelineState(the_compiler, pipeline_descriptor, compiler_task_options, *error);
     if !pipeline_state  log_error("Problem creating graphics pipeline: %", error);
     assert(pipeline_state != null);
 
@@ -561,10 +561,10 @@ set_pipeline :: (command_buffer: CommandBuffer, pipeline: Pipeline) {
         setCullMode(render_encoder, cull_mode);
 
         viewport := MTLViewport.{ 0, 0, WINDOW_WIDTH.(float32), WINDOW_HEIGHT.(float32), 0, 1};
-        setViewport(xx command_buffer.active_encoder, viewport);
+        setViewport(render_encoder, viewport);
 
         scissor_rect := MTLScissorRect.{ 0, 0, xx WINDOW_WIDTH, xx WINDOW_HEIGHT };
-        setScissorRect(xx command_buffer.active_encoder, scissor_rect);
+        setScissorRect(render_encoder, scissor_rect);
 
         command_buffer.active_pipeline = pipeline;
     }
@@ -617,7 +617,7 @@ create_depth_stencil_state :: (descriptor: DepthStencilDescriptor) -> DepthStenc
         setFrontFaceStencil(mtl_descriptor, front_stencil);
     }
 
-    depth_stencil_state := MTLDevice.newDepthStencilStateWithDescriptor(device, mtl_descriptor);
+    depth_stencil_state := newDepthStencilState(the_device, mtl_descriptor);
 
     depth_stencil_state_ptr := New(DepthStencilState_, false);
     depth_stencil_state_ptr.* = { descriptor, xx depth_stencil_state };
@@ -631,15 +631,15 @@ free_depth_stencil_state :: (depth_stencil_state: DepthStencilState) {
 }
 
 set_depth_stencil_state :: (command_buffer: CommandBuffer, depth_stencil_state: DepthStencilState) {
+    assert(command_buffer.active_encoder_kind == .Render);
+    encoder := cast(*MTL4RenderCommandEncoder, command_buffer.active_encoder);
     if depth_stencil_state {
-        assert(command_buffer.active_encoder_kind == .Render);
-        encoder := cast(*MTL4RenderCommandEncoder, command_buffer.active_encoder);
 
         setDepthStencilState(encoder, depth_stencil_state.state);
         setDepthBias(encoder, depth_stencil_state.descriptor.depth_bias, depth_stencil_state.descriptor.depth_bias_slope_factor, depth_stencil_state.descriptor.depth_bias_clamp);
         setStencilReferenceValues(encoder, depth_stencil_state.descriptor.stencil_front.reference, depth_stencil_state.descriptor.stencil_back.reference);
     } else {
-        setDepthStencilState(xx command_buffer.active_encoder, null);
+        setDepthStencilState(encoder, null);
     }
 }
 
@@ -647,12 +647,15 @@ set_blend_state :: () {} // FIXME: IMPLEMENT
 
 draw_indexed :: (command_buffer: CommandBuffer, vertex_data_gpu: *void, pixel_data_gpu: *void, index_buffer_gpu: *void, index_count: int){
     #insert,scope() draw_call_assertions;
+    render_encoder := cast(*MTL4RenderCommandEncoder, command_buffer.active_encoder);
 
     setAddress(command_buffer.vertex_argument_table, xx vertex_data_gpu, 0);
     setAddress(command_buffer.pixel_argument_table, xx pixel_data_gpu, 0);
 
     primitive_type := convert_topology_to_primitive(command_buffer.active_pipeline.graphics.descriptor.topology);
-    drawIndexedPrimitives(xx command_buffer.active_encoder, primitive_type, xx index_count, .MTLIndexTypeUInt32, xx index_buffer_gpu, xx (index_count * 4));
+    nsu_index_count := cast(NSUInteger, index_count);
+    assert(nsu_index_count != 0, "draw_indexed received an index buffer of size 0!");
+    drawIndexedPrimitives(render_encoder, primitive_type, nsu_index_count, .MTLIndexTypeUInt32, xx index_buffer_gpu, nsu_index_count * 4);
 }
 
 #load "graphics.jai";
@@ -689,32 +692,32 @@ convert_stencil_op :: (op: Op) -> MTLStencilOperation {
 
 convert_cull :: (cull: Cull) -> MTLCullMode {
     if cull == {
-        case .CCW;      return MTLCullModeBack;
-        case .CW;       return MTLCullModeFront;
-        case .All;      return MTLCullModeNone; // I have no idea what cull all is supposed to do
-        case .None;     return MTLCullModeNone;
-        case; assert(false); return MTLCullModeNone;
+        case .CCW;      return .Back;
+        case .CW;       return .Front;
+        case .All;      return .None; // I have no idea what cull all is supposed to do
+        case .None;     return .None;
+        case; assert(false); return .None;
     };
 }
 
 convert_topology_to_primitive :: (topology: Topology) -> MTLPrimitiveType {
     if topology == {
-        case .None;             assert(false); return MTLPrimitiveTypeTriangle;
-        case .Triangle;         return MTLPrimitiveTypeTriangle;
-        case .Line;             return MTLPrimitiveTypeLine;
-        case .Point;            return MTLPrimitiveTypePoint;
-        case .Triangle_Strip;   return MTLPrimitiveTypeTriangleStrip;
-        case; assert(false); return MTLPrimitiveTypeTriangle;
+        case .None;             assert(false); return .Triangle;
+        case .Triangle;         return .Triangle;
+        case .Line;             return .Line;
+        case .Point;            return .Point;
+        case .Triangle_Strip;   return .TriangleStrip;
+        case; assert(false); return .Triangle;
     };
 }
 convert_primitive_topology :: (topology: Topology) -> MTLPrimitiveTopologyClass {
 if topology == {
-        case .None;             return MTLPrimitiveTopologyClassUnspecified;
-        case .Point;            return MTLPrimitiveTopologyClassPoint;
-        case .Line;             return MTLPrimitiveTopologyClassLine;
-        case .Triangle;         return MTLPrimitiveTopologyClassTriangle;
-        case .Triangle_Strip;   return MTLPrimitiveTopologyClassTriangle;
-        case; return MTLPrimitiveTopologyClassUnspecified;
+        case .None;             return .Unspecified;
+        case .Point;            return .Point;
+        case .Line;             return .Line;
+        case .Triangle;         return .Triangle;
+        case .Triangle_Strip;   return .Triangle;
+        case; return .Unspecified;
     }
 }
 
@@ -728,7 +731,7 @@ get_command_allocator_from_pool :: () -> *MTL4CommandAllocator {
         reset(allocator);
         //log("got allocator % from pool", allocator);
     } else {
-        allocator = MTLDevice.newCommandAllocator(device);
+        allocator = newCommandAllocator(the_device);
         //log("allocated new command allocator: %", allocator);
     }
     return allocator;
@@ -756,7 +759,7 @@ return_command_buffer_to_pool :: (command_buffer: *MTL4CommandBuffer) { array_ad
 // TODO: I think we can bake the first argument 
 get_argument_table_from_pool :: (pool : *[..]*MTL4ArgumentTable, descriptor: *MTL4ArgumentTableDescriptor) -> *MTL4ArgumentTable {
     error: *NSError;
-    argument_table := MTLDevice.newArgumentTableWithDescriptor_error(device, descriptor, *error);
+    argument_table := newArgumentTable(the_device, descriptor, *error);
     if !argument_table  log_error("Problem creating argument table %", error);
     assert(argument_table != null);
     return argument_table;
@@ -794,7 +797,7 @@ make_metal_lib :: (slang_ir: []u8) -> *MTLLibrary {
     dispatch_data := dispatch_data_create(metal_lib_data.data, xx metal_lib_data.count, null, null);
 
     error : *NSError;
-    metal_lib := MTLDevice.newLibraryWithData_error(device, dispatch_data, *error);
+    metal_lib := newLibrary(the_device, dispatch_data, *error);
     if !metal_lib log_error("Problem creating metal_lib: %\n", error);
     assert(metal_lib != null);
 
@@ -806,7 +809,7 @@ make_metal_lib :: (slang_ir: []u8) -> *MTLLibrary {
 make_metal_function :: (slang_ir: []u8) -> *MTLFunction {
     metal_lib := make_metal_lib(slang_ir);
     apple_string := NSString.getTempString("main_0");
-    fn := MTLLibrary.newFunctionWithName(metal_lib, apple_string);
+    fn := newFunction(metal_lib, apple_string);
     metal_fn := cast(*MTLFunction, fn);
 
     // to fail
@@ -838,7 +841,7 @@ Heap :: struct {
 
 
 the_swapchain : *CAMetalLayer;
-device : *MTLDevice;
+the_device : *MTLDevice;
 arc_pool: *NSAutoreleasePool;
 allocations: Table(*void, *MTLBuffer);
 command_allocators: [..]*MTL4CommandAllocator;
@@ -850,7 +853,7 @@ command_buffers: [..]*MTL4CommandBuffer;
 vertex_argument_tables: [..]*MTL4ArgumentTable;
 pixel_argument_tables: [..]*MTL4ArgumentTable;
 compute_argument_tables: [..]*MTL4ArgumentTable;
-compiler: *MTL4Compiler;
+the_compiler: *MTL4Compiler;
 
 
 // NOTE: This is a placeholder implementation that we're using to test. 
@@ -892,7 +895,7 @@ END
 #import "Objective_C";
 #import "Objective_C/AppKit";
 #import "Objective_C/LightweightRenderingView";
-#import "Metal"(DEBUG_PRINT_GENERATED_CODE = #exists(DEBUG_PRINT_GENERATED_CODE));
+#import "MTL";
 #import "Hash_Table";
 #import "macos";
 #import "Basic";

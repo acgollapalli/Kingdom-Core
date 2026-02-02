@@ -895,7 +895,7 @@ END
 #import "Objective_C";
 #import "Objective_C/AppKit";
 #import "Objective_C/LightweightRenderingView";
-#import "MTL";
+#import "MTL"(#exists(MTL_GENERATE));
 #import "Hash_Table";
 #import "macos";
 #import "Basic";

@@ -1,8 +1,4 @@
-#import "Compiler";
-#import "Basic";
-#import "Program_Print";  // For print_expression.
-
-SELECTOR_STRUCT_NAME :: "__selectors";
+#scope_module
 
 METHOD_BODY :: (selector: Code, procedure_signature: Type, call := #caller_code) -> string {
     caller_nodes := compiler_get_nodes(call);
@@ -109,8 +105,16 @@ METHOD_BODY :: (selector: Code, procedure_signature: Type, call := #caller_code)
         function_declaration = builder_to_string(*builder);
     }
 
-    print("generated method body: \n%\n\n", function_declaration);
+    //print("generated method body: \n%\n\n", function_declaration);
 
     return function_declaration;
 }
+
+
+SELECTOR_STRUCT_NAME :: "__selectors";
+
+#import "Compiler";
+#import "Basic";
+#import "Program_Print";  // For print_expression.
+#import "String";
 

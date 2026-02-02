@@ -1,49 +1,9 @@
 /* Generates Metal bindings from metal-cpp */
 
+#scope_module
+
 // TODO: HANDLE STRUCT PACKING:
 // we may need to just remove the struct generation from this code and add it ourselves
-
-METAL_CPP_DIRECTORY :: #run sprint("%%", #filepath, "metal-cpp/Metal");
-QUARTZCORE_DIRECTORY :: #run sprint("%%", #filepath, "metal-cpp/QuartzCore");
-#scope_file
-Class :: struct {
-    name : string;
-    superclass : string;
-    namespace : string;
-    methods : [..] Method;
-}
-
-
-Method :: struct {
-    name : string;
-    return_type : string;
-    arguments : [..] Argument;
-    selector : string;
-}
-
-Argument :: struct { 
-    name: string; 
-    type: string;
-}
-
-Enum :: struct {
-    non_ns_name : string;
-    name : string;
-    type : string;
-    members : [..] EnumMember;
-}
-
-EnumMember :: struct {
-    name: string;
-    value: string;
-}
-
-Struct :: struct {
-    name: string;
-    members: [..]Argument;
-}
-
-#scope_module
 generate :: () -> module: string {
     classes : [..]Class;
     structs : [..]Struct;
@@ -87,6 +47,13 @@ generate :: () -> module: string {
 
     builder : String_Builder;
 
+    append(*builder, "/* Metal Wrappers generated from metal-cpp\n");
+    append(*builder, "\t NOTE: While this library uses metal-cpp for code generation, \n");
+    append(*builder, "\t it doesn't bind a separate C++ library, but calls the Objective C, \n");
+    append(*builder, "\t system libraries directly. */\n\n");
+
+    append(*builder, "#scope_export\n\n");
+
     for st : structs {
         struct_declaration := build_mtl_struct_declaration(st);
         append(*builder, struct_declaration);
@@ -111,7 +78,9 @@ generate :: () -> module: string {
         append(*builder, "\n");
     }
     
+    append(*builder, additional_module_code);
     append(*builder, selector_struct);
+    append(*builder, imports_to_insert);
 
     mtl_dot_jai := builder_to_string(*builder);
 
@@ -119,6 +88,8 @@ generate :: () -> module: string {
 
     return mtl_dot_jai;
 }
+
+#scope_file
 
 build_selector_struct :: () -> string {
     metal_file_name := tprint("%/%", METAL_CPP_DIRECTORY, "MTLHeaderBridge.hpp");
@@ -702,7 +673,121 @@ regularize_type :: (keyword: string) -> string {
     return type_name;
 }
 
+
+Class :: struct {
+    name : string;
+    superclass : string;
+    namespace : string;
+    methods : [..] Method;
+}
+
+
+Method :: struct {
+    name : string;
+    return_type : string;
+    arguments : [..] Argument;
+    selector : string;
+}
+
+Argument :: struct { 
+    name: string; 
+    type: string;
+}
+
+Enum :: struct {
+    non_ns_name : string;
+    name : string;
+    type : string;
+    members : [..] EnumMember;
+}
+
+EnumMember :: struct {
+    name: string;
+    value: string;
+}
+
+Struct :: struct {
+    name: string;
+    members: [..]Argument;
+}
+
+METAL_CPP_DIRECTORY :: #run sprint("%%", #filepath, "metal-cpp/Metal");
+QUARTZCORE_DIRECTORY :: #run sprint("%%", #filepath, "metal-cpp/QuartzCore");
+
 #import "Basic";
 #import "File";
 #import "String";
 #import "File_Utilities";
+
+additional_module_code :: #string END
+
+NSFastEnumeration :: struct {};
+task_id_token_t :: struct {};
+NSNumber :: struct {};
+
+// TODO: make it so the parser can read these or just implement them here
+PackedFloat3 :: struct {}
+PackedFloatQuaternion :: struct {}
+
+init_mtl :: () {
+    if __selectors.accelerationStructureCommandEncoder return;
+
+    init_objective_c_selector_struct(*__selectors);
+
+    assert(__selectors.supportsFamily_ != null);
+}
+
+
+
+MTLTimestamp :: u64;
+MTLGPUAddress :: u64;
+
+MTLCoordinate2D :: MTLSamplePosition;
+
+
+// we can't handle these yet, but they're block items
+MTLNewRenderPipelineStateWithReflectionCompletionHandler :: *void;
+MTLSharedEventNotificationBlock :: *void;
+MTLNewRenderPipelineStateCompletionHandler :: *void;
+MTLNewLibraryCompletionHandler :: *void;
+MTLNewDynamicLibraryCompletionHandler :: *void;
+MTLNewComputePipelineStateWithReflectionCompletionHandler :: *void;
+MTLNewComputePipelineStateCompletionHandler :: *void;
+MTLIOCommandBufferHandler :: *void;
+MTLDrawablePresentedHandler :: *void;
+MTLCommandBufferHandler :: *void;
+MTL4NewMachineLearningPipelineStateCompletionHandler :: *void;
+MTL4NewBinaryFunctionCompletionHandler :: *void;
+MTL4CommitFeedbackHandler :: *void;
+
+MTLAutoreleasedComputePipelineReflection :: *MTLComputePipelineReflection;
+MTLAutoreleasedRenderPipelineReflection :: *MTLRenderPipelineReflection;
+MTLAutoreleasedArgument :: *MTLArgument;
+
+// These are opaque
+IOSurfaceRef :: *void;
+CGColorSpaceRef :: *void;
+
+
+// borrowed from the code that ships with the compiler
+MTLCreateSystemDefaultDevice :: () -> id #foreign Metal;
+MTLCopyAllDevices :: () -> *NSArray(id) #foreign Metal;
+MTLDeviceNotificationName :: *NSString;
+MTLDeviceWasAddedNotification: MTLDeviceNotificationName;
+MTLDeviceRemovalRequestedNotification: MTLDeviceNotificationName;
+MTLDeviceWasRemovedNotification: MTLDeviceNotificationName;
+MTLRemoveDeviceObserver :: (observer: id) -> () #foreign Metal;
+Metal :: #library,system,link_always "Metal";  // We were having some problems on Mac, so, try this.. .
+
+#scope_file
+
+__selectors: __generated_selectors;
+
+END
+
+imports_to_insert :: #string END 
+
+#import "Objective_C";
+#import "macos";
+
+END

@@ -1,69 +1,38 @@
-#scope_module
-#load "generate.jai";
-#load "macros.jai";
+/* Module code for MTL */
 
-#import "Objective_C";
-#import "macos";
+#module_parameters(MTL_GENERATE := false);
 
-#scope_export
-
+#if MTL_GENERATE {
+    #run print("Module[MTL]: generating MTL bindings and inserting...\n");
+    #load "generate.jai";
     #insert #run generate();
-
-NSFastEnumeration :: struct {};
-task_id_token_t :: struct {};
-NSNumber :: struct {};
-
-// TODO: make it so the parser can read these or just implement them here
-PackedFloat3 :: struct {}
-PackedFloatQuaternion :: struct {}
-
-init_mtl :: () {
-    if __selectors.accelerationStructureCommandEncoder return;
-
-    init_objective_c_selector_struct(*__selectors);
-
-    assert(__selectors.supportsFamily_ != null);
+} else {
+    #run print("Module[MTL]: loading cached MTL bindings \n");
+    #load "MTL.jai";
 }
 
+#scope_file
+#load "macros.jai";
 
-__selectors: __generated_selectors;
-
-MTLTimestamp :: u64;
-MTLGPUAddress :: u64;
-
-MTLCoordinate2D :: MTLSamplePosition;
+#import "Basic";
 
 
-// we can't handle these yet, but they're block items
-MTLNewRenderPipelineStateWithReflectionCompletionHandler :: *void;
-MTLSharedEventNotificationBlock :: *void;
-MTLNewRenderPipelineStateCompletionHandler :: *void;
-MTLNewLibraryCompletionHandler :: *void;
-MTLNewDynamicLibraryCompletionHandler :: *void;
-MTLNewComputePipelineStateWithReflectionCompletionHandler :: *void;
-MTLNewComputePipelineStateCompletionHandler :: *void;
-MTLIOCommandBufferHandler :: *void;
-MTLDrawablePresentedHandler :: *void;
-MTLCommandBufferHandler :: *void;
-MTL4NewMachineLearningPipelineStateCompletionHandler :: *void;
-MTL4NewBinaryFunctionCompletionHandler :: *void;
-MTL4CommitFeedbackHandler :: *void;
 
-MTLAutoreleasedComputePipelineReflection :: *MTLComputePipelineReflection;
-MTLAutoreleasedRenderPipelineReflection :: *MTLRenderPipelineReflection;
-MTLAutoreleasedArgument :: *MTLArgument;
-
-// These are opaque
-IOSurfaceRef :: *void;
-CGColorSpaceRef :: *void;
+/* 
 
 
-// borrowed from the code that ships with the compiler
-MTLCreateSystemDefaultDevice :: () -> id #foreign Metal;
-MTLCopyAllDevices :: () -> *NSArray(id) #foreign Metal;
-MTLDeviceNotificationName :: *NSString;
-MTLDeviceWasAddedNotification: MTLDeviceNotificationName;
-MTLDeviceRemovalRequestedNotification: MTLDeviceNotificationName;
-MTLDeviceWasRemovedNotification: MTLDeviceNotificationName;
-MTLRemoveDeviceObserver :: (observer: id) -> () #foreign Metal;
-Metal :: #library,system,link_always "Metal";  // We were having some problems on Mac, so, try this...
+load_these :: () -> string #compile_time {
+    s : string;
+    #if MTL_GENERATE {
+        print("generating MTL.jai\n");
+        s = "#load \"generate.jai\";\n #insert #run generate();";
+    } else {
+        print("loading cached MTL.jai\n");
+        s = "#load \"MTL.jai\";";
+    }
+    return s;
+}
+
+#insert #run load_these();
+
+*/

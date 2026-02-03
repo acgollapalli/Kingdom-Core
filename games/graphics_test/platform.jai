@@ -5,6 +5,7 @@
 
 init_app :: (title: string) -> Window_Type {
     the_window = create_window(WINDOW_WIDTH, WINDOW_HEIGHT, title);
+    init_graphics(); // TODO: rename this, it inits the graphics layer
     return the_window;
 }
 

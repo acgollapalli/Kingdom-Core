@@ -10,7 +10,7 @@
 #scope_export
 
 
-init :: () {
+init_graphics :: () {
     init_mtl();
 
     arc_pool = objc_new(NSAutoreleasePool);
@@ -298,14 +298,6 @@ get_next_swapchain_image :: () -> *CAMetalDrawable {
 
 get_swapchain_texture :: (swapchain_image: *CAMetalDrawable) -> *MTLTexture {
     swapchain_texture := texture(swapchain_image);
-
-    assert(swapchain_texture != null);
-    assert(width(swapchain_texture) > 1);
-    assert(height(swapchain_texture) > 1);
-    assert(pixelFormat(swapchain_texture) == .BGRA8Unorm_sRGB);
-    print("swapchain texture size is: %, %\n", width(swapchain_texture), height(swapchain_texture));
-    print("swapchain pixel format is: %\n", pixelFormat(swapchain_texture));
-
     return swapchain_texture;
 }
 

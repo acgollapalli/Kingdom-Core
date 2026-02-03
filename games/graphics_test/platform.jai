@@ -8,15 +8,18 @@ init_app :: (title: string) -> Window_Type {
     return the_window;
 }
 
-USE_APPLE_HEAP_ALLOCATION :: true;
 
 #if OS == .MACOS {
     #load "macos.jai";
 }
 
 
+
 #scope_module
 the_window: Window_Type;
+
+USE_APPLE_HEAP_ALLOCATION :: true;
+__USE_MTL4_COMPILER :: #exists(GFX_USE_MTL4_COMPILER);
 
 #scope_file
 

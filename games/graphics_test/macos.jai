@@ -19,19 +19,18 @@ init :: () {
     {
         view := objc_init(objc_alloc(NSView));
         NSView.setWantsLayer(view, YES);
-        autorelease(view);
+        //autorelease(view);
 
         the_swapchain = objc_init(objc_alloc(CAMetalLayer));
-        the_device = xx MTLCreateSystemDefaultDevice();
+        the_device = MTLCreateSystemDefaultDevice();
         setDevice(the_swapchain, the_device);
-        //CAMetalLayer.setOpaque(the_swapchain, true); // @TODO: Update the Objective_C Module so that CALayer has the opaque property
 
         setDrawableSize(the_swapchain, { WINDOW_WIDTH, WINDOW_HEIGHT }); // @TODO: Use convertSizeToBacking instead
-        setFramebufferOnly(the_swapchain, xx true);
+        setFramebufferOnly(the_swapchain, false); // set to false for debugging and true for performance
         setPixelFormat(the_swapchain, .MTLPixelFormatBGRA8Unorm_sRGB); // TODO: set up a standard way for users to know from the platform layer what pixel format the swapchain is in. (just saying it's always BGRA8Unorm_sRGB would prevent us from ever supporting HDR in the future)
 
-        NSView.setLayer(view, xx the_swapchain);
-        assert(NSView.layer(view) == xx the_swapchain);
+        NSView.setLayer(view, the_swapchain);
+        assert(NSView.layer(view) == the_swapchain);
 
         NSWindow.setContentView(the_window, view);
         NSWindow.makeFirstResponder(the_window, view);
@@ -40,37 +39,18 @@ init :: () {
     // set up argument table descriptors
     {
         compute_arg_table_descriptor = objc_new(MTL4ArgumentTableDescriptor);
-        setMaxBufferBindCount(render_arg_table_descriptor, 2);
-        setSupportAttributeStrides(render_arg_table_descriptor, xx true);
+        setMaxBufferBindCount(compute_arg_table_descriptor, 2);
+        setSupportAttributeStrides(compute_arg_table_descriptor, xx true);
 
         render_arg_table_descriptor = objc_new(MTL4ArgumentTableDescriptor);
         setMaxBufferBindCount(render_arg_table_descriptor, 2);
         setSupportAttributeStrides(render_arg_table_descriptor, xx true);
     }
 
-    // add some command allocators
-    /* HACK: For some reason, arrray resizes of the argument table arrays are trashing the memory of the pipeline
-        state object in our test program. So we just allocate space for a bunch of them
-        we shoule either:
-            a) just set a max number of these and allocate them at start time (maybe with a module flag for the sizes or something)
-            b) move to some kind of pool object where we're explicitly controlling allocations.
-
-        TODO: find a minimal example that reproduces the problem and mail it in to Jon (if he hasn't already fixed it in the next
-        compiler update
-    */
-    {
-        expected_buffers_in_flight := 12;
-        for 0..(expected_buffers_in_flight -1) array_add(*command_allocators, newCommandAllocator(the_device));
-        array_reserve(*command_buffers, expected_buffers_in_flight);
-        array_reserve(*vertex_argument_tables, expected_buffers_in_flight);
-        array_reserve(*pixel_argument_tables, expected_buffers_in_flight);
-        array_reserve(*compute_argument_tables, expected_buffers_in_flight);
-    }
-
     // set up gpu memory heap
     #if #exists(USE_APPLE_HEAP_ALLOCATION) {
         descriptor := objc_new(MTLHeapDescriptor);
-        autorelease(descriptor);
+        //autorelease(descriptor);
 
         setType(descriptor, .Automatic); // technically the default
         setStorageMode(descriptor, .MTLStorageModeShared);
@@ -94,28 +74,40 @@ init :: () {
     }
 
     // setup a compiler instance
+    #if __USE_MTL4_COMPILER // as of january 2025, MTL4Compiler breaks XCodes Metal Debugger
     {
         pipeline_data_set_serializer_descriptor := objc_new(MTL4PipelineDataSetSerializerDescriptor);
         setConfiguration(pipeline_data_set_serializer_descriptor, .CaptureBinaries | .CaptureDescriptors);
-        autorelease(pipeline_data_set_serializer_descriptor);
+        //autorelease(pipeline_data_set_serializer_descriptor);
 
         pipeline_data_set_serializer := newPipelineDataSetSerializer(the_device, pipeline_data_set_serializer_descriptor);
 
         compiler_descriptor := objc_new(MTL4CompilerDescriptor);
         setPipelineDataSetSerializer(compiler_descriptor, pipeline_data_set_serializer);
-        autorelease(compiler_descriptor);
+        //autorelease(compiler_descriptor);
 
         error: *NSError;
         the_compiler = newCompiler(the_device, compiler_descriptor, *error);
         if !the_compiler log_error("Problem creating shader compiler: %", error);
         assert(the_compiler != null);
     }
+
+    // init timeline_semaphore
+    {
+        timeline_semaphore = create_semaphore();
+    }
 }
 
 begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: RenderPassDescriptor) {
 
     render_pass := objc_new(MTL4RenderPassDescriptor);
-    autorelease(render_pass);
+    //autorelease(render_pass);
+
+    // debug asserts
+    target_texture := render_pass_descriptor.color_targets[0].texture;
+    assert(width(target_texture) > 1);
+    assert(height(target_texture) > 1);
+    assert(pixelFormat(target_texture) == .BGRA8Unorm_sRGB);
 
     // validate RenderPassDescriptor
     // TODO: ensure this whole block gets compiled out on release builds
@@ -133,7 +125,7 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
     }
 
     configure_render_pass_attachment :: (attachment: *MTLRenderPassAttachmentDescriptor, texture_handle: TextureHandle, load_op: LoadOp, store_op: StoreOp) {
-        setTexture(attachment, xx texture_handle);
+        setTexture(attachment, texture_handle);
 
         // setLevel(attachment, 0); // mipmap level, this is the default value
         // setSlice(attachment, 0); // texture layer, this is the default value
@@ -167,8 +159,6 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
 
     // set color targets
     for render_pass_descriptor.color_targets {
-        using MTLRenderPassColorAttachmentDescriptor;
-
         color_attachment := object(colorAttachments(render_pass), xx it_index);
         //autorelease(color_attachment);
 
@@ -182,9 +172,10 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
 
     // set depth target
     {
-        using MTLRenderPassDepthAttachmentDescriptor;
-        depth_attachment := objc_new(MTLRenderPassDepthAttachmentDescriptor);
-        autorelease(depth_attachment);
+        //depth_attachment := objc_new(MTLRenderPassDepthAttachmentDescriptor);
+        //autorelease(depth_attachment);
+        depth_attachment := depthAttachment(render_pass);
+        assert(depth_attachment != null);
         depth_target := render_pass_descriptor.depth_target;
 
         configure_render_pass_attachment(depth_attachment, depth_target.texture, depth_target.load_op, depth_target.store_op);
@@ -213,9 +204,11 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
 
     // set stencil target
     {
-        using MTLRenderPassStencilAttachmentDescriptor;
-        stencil_attachment := objc_new(MTLRenderPassStencilAttachmentDescriptor);
-        autorelease(stencil_attachment);
+        //stencil_attachment := objc_new(MTLRenderPassStencilAttachmentDescriptor);
+        //autorelease(stencil_attachment);
+        stencil_attachment := stencilAttachment(render_pass);
+        assert(stencil_attachment != null);
+
         stencil_target := render_pass_descriptor.stencil_target;
 
         configure_render_pass_attachment(stencil_attachment, stencil_target.texture, stencil_target.load_op, stencil_target.store_op);
@@ -246,10 +239,11 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
 
     if command_buffer.active_encoder != null {
         endEncoding(command_buffer.active_encoder);
-        autorelease(command_buffer.active_encoder);
+        //autorelease(command_buffer.active_encoder);
     }
     
     command_buffer.active_encoder = renderCommandEncoder(command_buffer.buffer, render_pass);
+    assert(command_buffer.active_encoder != null);
 
     command_buffer.active_encoder_kind = .Render;
 
@@ -260,7 +254,7 @@ begin_render_pass :: (command_buffer: CommandBuffer, render_pass_descriptor: Ren
 end_render_pass :: (command_buffer: CommandBuffer) {
     assert(command_buffer.active_encoder_kind == .Render); // @TODO: need to ensure this becomes a wasm_runtime_assert in wasm
     endEncoding(command_buffer.active_encoder);
-    autorelease(command_buffer.active_encoder); // TODO: We may be able to reuse these. But should we? It adds complexity
+    //autorelease(command_buffer.active_encoder); // TODO: We may be able to reuse these. But should we? It adds complexity
     command_buffer.active_encoder = null;
     command_buffer.active_encoder_kind = .None;
 }
@@ -273,13 +267,7 @@ get_command_queue :: () -> CommandQueue {
 }
 
 start_command_recording :: (command_queue: CommandQueue) -> CommandBuffer {
-    command_buffer := New(CommandBuffer_);
-    command_buffer.buffer = newCommandBuffer(the_device);
-    command_buffer.allocator = get_command_allocator_from_pool();
-    command_buffer.vertex_argument_table = get_vertex_argument_table();
-    command_buffer.pixel_argument_table = get_pixel_argument_table();
-    command_buffer.compute_argument_table = get_compute_argument_table();
-
+    command_buffer := get_command_buffer();
     beginCommandBuffer(command_buffer.buffer, command_buffer.allocator);
 
     return command_buffer;
@@ -294,37 +282,31 @@ submit :: (command_queue: CommandQueue, command_buffers: .. CommandBuffer) {
     }
 
     commit(command_queue, _buffers.data, xx _buffers.count);
+    signalEvent(command_queue, timeline_semaphore, frame_counter);
+    frame_counter += 1;
+}
 
-    // NOTE: we may get a performance boost by reusing the allocators
-    // but we need to set up and manage fences for that first
-    // actually everything here is reusable, and the only reason we aren't 
-    // is to minimize initial bugs at the cost of performance
-    // for command_buffers  return_command_allocator_to_pool(it.allocator);
-    /* WARNING: resizes of these arrays for some reason trash memory elsewhere.
-        It's likely a compiler bug, so not something we can fix ourselves.
-    */
-    for command_buffers {
-        return_command_allocator_to_pool(it.allocator);
-        return_command_buffer_to_pool(it.buffer);
-        return_vertex_argument_table_to_pool(it.vertex_argument_table);
-        return_pixel_argument_table_to_pool(it.pixel_argument_table);
-        return_compute_argument_table_to_pool(it.compute_argument_table);
-    }
-
-    // xcode gives a bad memory access on this
-    // apparently it's trying to release something that it can't or shouldn't
-    // no clue what's happening here, but best thing is to just not use arc
-    //NSAutoreleasePool.drain(arc_pool);
-    //release(arc_pool);
-    //arc_pool = objc_new(NSAutoreleasePool);
+submit :: (command_queue: CommandQueue, command_buffers: .. CommandBuffer, semaphore: Semaphore, semaphore_value: u64) {
+    submit(command_queue, ..command_buffers);
+    signalEvent(command_queue, semaphore, semaphore_value);
 }
 
 get_next_swapchain_image :: () -> *CAMetalDrawable {
-    return nextDrawable(the_swapchain);
+    swapchain_image := nextDrawable(the_swapchain);
+    return swapchain_image;
 }
 
 get_swapchain_texture :: (swapchain_image: *CAMetalDrawable) -> *MTLTexture {
-    return texture(swapchain_image);
+    swapchain_texture := texture(swapchain_image);
+
+    assert(swapchain_texture != null);
+    assert(width(swapchain_texture) > 1);
+    assert(height(swapchain_texture) > 1);
+    assert(pixelFormat(swapchain_texture) == .BGRA8Unorm_sRGB);
+    print("swapchain texture size is: %, %\n", width(swapchain_texture), height(swapchain_texture));
+    print("swapchain pixel format is: %\n", pixelFormat(swapchain_texture));
+
+    return swapchain_texture;
 }
 
 // NOTE: Since we're acquiring our swapchain image from CAMetalLayer.nextDrawable(),
@@ -401,11 +383,10 @@ present_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMet
 
         cast(*MTLResource, mtl_buffer_id); // MTLBuffer inherits from MTLResource
         makeAliasable(mtl_buffer_id); // allows the heap memory to be reused
-        autorelease(mtl_buffer_id);
+        //autorelease(mtl_buffer_id);
         table_remove(*allocations, address);
     }
 }
-
 // NOTE: vertex_shader and pixel_shader are the IR of the Slang Shading Language.
 // This means that if you want to pass shaders to this procedure, then you need 
 // to compile them using the compile_to_slang_ir in shader_compiler.jai (in modules).
@@ -413,14 +394,26 @@ present_swapchain_image :: (command_queue: CommandQueue, swapchain_image: *CAMet
 // refactor it to take the native IR of the platform so that you can go directly from
 // your shader source directly to the metallib.
 create_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_descriptor: RasterDescriptor) -> Pipeline {
+    #if __USE_MTL4_COMPILER {
+        #run print("Module[GFX]: using MTL4Compiler, using MTL4RenderPipelineDescriptor\n");
+        return create_MTL4_graphics_pipeline(vertex_shader, pixel_shader, raster_descriptor);
+    } else {
+        #run print("Module[GFX]: NOT using MTL4Compiler, using MTLRenderPipelineDescriptor\n");
+        return create_MTL_graphics_pipeline(vertex_shader, pixel_shader, raster_descriptor);
+    }
+}
+
+#scope_file
+
+create_MTL4_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_descriptor: RasterDescriptor) -> Pipeline {
     pipeline_descriptor := objc_new(MTL4RenderPipelineDescriptor);
     autorelease(pipeline_descriptor);
 
     pipeline_options := objc_new(MTL4PipelineOptions);
-    #if #exists(DEBUG_PIPELINES) {
+    //#if #exists(DEBUG_PIPELINES) {
         setShaderReflection(pipeline_options, xx true);
         setShaderValidation(pipeline_options, xx true);
-    }
+    //}
     setOptions(pipeline_descriptor, pipeline_options);
     
     alpha_to_coverage : MTL4AlphaToCoverageState  = ifx raster_descriptor.alpha_to_coverage then .Enabled else .Disabled; 
@@ -439,15 +432,12 @@ create_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_des
     reset(color_attachments); // just to make sure there isn't anything finicky going on there
 
     for raster_descriptor.color_targets {
-        color_attachment_descriptor := objc_new(MTL4RenderPipelineColorAttachmentDescriptor);
-        autorelease(color_attachment_descriptor); //TODO: once it works, uncomment this
+        color_attachment_descriptor := object(color_attachments, xx it_index);
 
-        #assert(MTLPixelFormat.EAC_RGBA8_sRGB == cast(MTLPixelFormat, Format.EAC_RGBA8_sRGB));
-        pixel_format := cast(MTLPixelFormat, it.format);
+        pixel_format := convert_pixel_format(it.format);
         setPixelFormat(color_attachment_descriptor, pixel_format);
 
-        #assert(MTLColorWriteMask.Green == cast(MTLColorWriteMask, (0x04).(u8))); 
-        write_mask := cast(MTLColorWriteMask, it.write_mask);
+        write_mask := convert_write_mask(it.write_mask);
         setWriteMask(color_attachment_descriptor, write_mask);
 
         if raster_descriptor.blend_descriptor {
@@ -478,7 +468,6 @@ create_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_des
         } else {
             setBlendingState(color_attachment_descriptor, .Unspecialized);
         }
-        setObject(color_attachments, color_attachment_descriptor, xx it_index);
     }
 
     
@@ -542,6 +531,117 @@ create_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_des
     return pipeline;
 }
 
+create_MTL_graphics_pipeline :: (vertex_shader: []u8, pixel_shader: []u8, raster_descriptor: RasterDescriptor) -> Pipeline {
+    mtl_descriptor := objc_new(MTLRenderPipelineDescriptor);
+    autorelease(mtl_descriptor);
+
+    // NOTE: we might want to call this if we were reusing them
+    // reset(mtl_descriptor);
+
+    vertex_fn := make_metal_function(vertex_shader);
+    setVertexFunction(mtl_descriptor, vertex_fn);
+
+    fragment_fn := make_metal_function(pixel_shader);
+    setFragmentFunction(mtl_descriptor, fragment_fn);
+
+    // NOTE: default values
+    //setMaxVertexCallStackDepth(mtl_descriptor, 1);
+    //setMaxFragmentCallStackDepth(mtl_descriptor, 1);
+
+    // NOTE: we don't use this since we're using vertex fetch via an argument buffer
+    // setVertexDescriptor(mtl_descriptor, null);
+
+    // NOTE: set pipeline mutability options. We don't use this, although maybe we need to
+    // vertex_buffers := vertexBuffers(mtl_descriptor);
+    // fragment_buffers := fragmentBuffers(mtl_descriptor);
+
+    color_attachments := colorAttachments(mtl_descriptor);
+    for raster_descriptor.color_targets {
+        attachment := object(color_attachments, xx it_index);
+
+        pixel_format := convert_pixel_format(it.format);
+        setPixelFormat(attachment, pixel_format);
+
+        write_mask := convert_write_mask(it.write_mask);
+        setWriteMask(attachment, write_mask);
+
+        assert(raster_descriptor.blend_descriptor != null); // only for debugging
+//        if raster_descriptor.blend_descriptor 
+        {
+            blend := raster_descriptor.blend_descriptor.*;
+
+            setBlendingEnabled(attachment, true);
+
+            alpha_blend_op := convert_blend(blend.alpha_op);
+            setAlphaBlendOperation(attachment, alpha_blend_op);
+
+            rgb_blend_op := convert_blend(blend.color_op);
+            setRgbBlendOperation(attachment, rgb_blend_op);
+
+            dst_alpha_blend_factor := convert_factor(blend.dst_alpha_factor);
+            setDestinationAlphaBlendFactor(attachment, dst_alpha_blend_factor);
+
+            dst_rgb_blend_factor := convert_factor(blend.dst_color_factor);
+            setDestinationRGBBlendFactor(attachment, dst_rgb_blend_factor);
+
+            src_alpha_blend_factor := convert_factor(blend.src_alpha_factor);
+            setSourceAlphaBlendFactor(attachment, src_alpha_blend_factor);
+
+            src_rgb_blend_factor := convert_factor(blend.src_color_factor);
+            setSourceRGBBlendFactor(attachment, src_rgb_blend_factor);
+        }
+    }
+
+    depth_format := convert_pixel_format(raster_descriptor.depth_format);
+    setDepthAttachmentPixelFormat(mtl_descriptor, depth_format);
+
+    stencil_format := convert_pixel_format(raster_descriptor.stencil_format);
+    setStencilAttachmentPixelFormat(mtl_descriptor, stencil_format);
+
+    setAlphaToCoverageEnabled(mtl_descriptor, xx raster_descriptor.alpha_to_coverage);
+
+    // NOTE: I'm not sure we need this.
+    //setAlphaToOneEnabled(mtl_descriptor, xx false);
+
+    // NOTE: default value
+    //setRasterizationEnabled(mtl_descriptor, xx true);
+
+    primitive_topology := convert_primitive_topology(raster_descriptor.topology);
+    setInputPrimitiveTopology(mtl_descriptor, primitive_topology);
+
+    setRasterSampleCount(mtl_descriptor, raster_descriptor.sample_count);
+
+    // NOTE: tesselation and other functions here:
+    // see: https://developer.apple.com/documentation/metal/mtlrenderpipelinedescriptor#Specifying-tessellation-state
+
+    // NOTE: we may need this for indirect multidraw
+    // setSupportIndirectCommandBuffers(mtl_descriptor, xx true);
+
+
+    //#if #exists(DEBUG_PIPELINES) {
+        setShaderValidation(mtl_descriptor, xx true);
+    //}
+
+    error: *NSError;
+    pipeline_state := newRenderPipelineState(the_device, mtl_descriptor, *error);
+    
+    if !pipeline_state  log_error("Problem creating graphics pipeline: %", error);
+
+    assert(pipeline_state != null);
+
+    pipeline := New(Pipeline_);
+    pipeline.* = { 
+        kind = .Graphics,
+        graphics = { raster_descriptor, pipeline_state }, 
+    };
+
+    log("pipeline created: %, deref'd: %", pipeline, pipeline.*);
+
+    return pipeline;
+}
+
+#scope_module
+
 free_pipeline :: (pipeline: Pipeline) {
     if pipeline.kind == .Graphics || pipeline.kind == .GraphicsMeshlet {
         release(pipeline.graphics.pipeline);
@@ -555,7 +655,7 @@ set_pipeline :: (command_buffer: CommandBuffer, pipeline: Pipeline) {
         assert(command_buffer.active_encoder_kind == .Render);
         render_encoder := cast(*MTL4RenderCommandEncoder, command_buffer.active_encoder);
 
-        setRenderPipelineState(render_encoder, xx pipeline.graphics.pipeline);
+        setRenderPipelineState(render_encoder, pipeline.graphics.pipeline);
 
         cull_mode := convert_cull(pipeline.graphics.descriptor.cull);
         setCullMode(render_encoder, cull_mode);
@@ -620,7 +720,7 @@ create_depth_stencil_state :: (descriptor: DepthStencilDescriptor) -> DepthStenc
     depth_stencil_state := newDepthStencilState(the_device, mtl_descriptor);
 
     depth_stencil_state_ptr := New(DepthStencilState_, false);
-    depth_stencil_state_ptr.* = { descriptor, xx depth_stencil_state };
+    depth_stencil_state_ptr.* = { descriptor, depth_stencil_state };
     return depth_stencil_state_ptr;
 }
 
@@ -645,6 +745,35 @@ set_depth_stencil_state :: (command_buffer: CommandBuffer, depth_stencil_state: 
 
 set_blend_state :: () {} // FIXME: IMPLEMENT
 
+// NOTE: Our GPU Semaphores are monotonically increasing timeline semaphores
+// we currently can't set the initial value of the semaphore without passing
+// in a command queue
+create_semaphore :: () -> Semaphore {
+    return newSharedEvent(the_device);
+}
+
+wait_semaphore :: (semaphore: Semaphore, wait_value: u64) {
+    while signaledValue(semaphore) <= wait_value {}
+}
+
+value_semaphore :: (semaphore: Semaphore) -> u64 {
+    return signaledValue(semaphore);
+}
+
+destroy_semaphore :: (semaphore: Semaphore) {
+    release(semaphore);
+}
+
+/* TODO: implement these. I'm not sure how you'd do this in metal yet.
+    The barrier part seems easy enough but the signal and wait parts of it
+    but the gpuSignalAfter and gpuWaitBefore are more complicated because
+    I don't know if Metal has a primitive that we can use to do that 
+
+    void gpuBarrier(GpuCommandBuffer cb, STAGE before, STAGE after, HAZARD_FLAGS hazards = 0);
+    void gpuSignalAfter(GpuCommandBuffer cb, STAGE before, void *ptrGpu, uint64 value, SIGNAL signal);
+    void gpuWaitBefore(GpuCommandBuffer cb, STAGE after, void *ptrGpu, uint64 value, OP op, HAZARD_FLAGS hazards = 0, uint64 mask = ~0);
+*/
+
 draw_indexed :: (command_buffer: CommandBuffer, vertex_data_gpu: *void, pixel_data_gpu: *void, index_buffer_gpu: *void, index_count: int){
     #insert,scope() draw_call_assertions;
     render_encoder := cast(*MTL4RenderCommandEncoder, command_buffer.active_encoder);
@@ -659,8 +788,6 @@ draw_indexed :: (command_buffer: CommandBuffer, vertex_data_gpu: *void, pixel_da
 }
 
 #load "graphics.jai";
-
-#scope_module
 
 Encoder_Kind :: enum {
     None;
@@ -679,19 +806,56 @@ convert_clear_color :: (clear_color: ClearColor) -> MTLClearColor {
 }
 
 convert_blend :: (blend: Blend) -> MTLBlendOperation {
-    return xx blend;
+    if #complete blend == {
+        case .Add; return .Add; 
+        case .Subtract; return .Subtract; 
+        case .Rev_Subtract; return .ReverseSubtract; 
+        case .Min; return .Min; 
+        case .Max; return .Max; 
+    }
+}
+
+convert_factor :: (factor: Factor) -> MTLBlendFactor {
+    if #complete factor == {
+        case .Zero; return .Zero; 
+        case .One; return .One; 
+        case .Src_Color; return .SourceColor; 
+        case .Dst_Color; return .DestinationColor; 
+        case .Src_Alpha; return .SourceAlpha; 
+        case .Dst_Alpha; return .DestinationAlpha; 
+    }
 }
 
 convert_op :: (op: Op) -> MTLCompareFunction {
-   return xx op; 
+    if op == {
+        case .Never; return .Never; 
+	    case .Less; return .Less; 
+	    case .Equal; return .Equal; 
+	    case .Less_Equal; return .LessEqual; 
+	    case .Greater; return .Greater; 
+	    case .Not_Equal; return .NotEqual; 
+	    case .Greater_Equal; return .GreaterEqual; 
+	    case .Always; return .Always; 
+        case; { assert(false); return .Always; }
+    }
 }
 
 convert_stencil_op :: (op: Op) -> MTLStencilOperation {
-    return xx op;
+    if op == {
+	    case .Keep; return .Keep; 
+	    case .Zero; return .Zero; 
+	    case .Replace; return .Replace; 
+	    case .IncrementClamp; return .IncrementClamp; 
+	    case .DecrementClamp; return .DecrementClamp; 
+	    case .Invert; return .Invert; 
+	    case .IncrementWrap; return .IncrementWrap; 
+	    case .DecrementWrap; return .DecrementWrap; 
+        case; { assert(false); return .Keep; }
+    }
 }
 
 convert_cull :: (cull: Cull) -> MTLCullMode {
-    if cull == {
+    if #complete cull == {
         case .CCW;      return .Back;
         case .CW;       return .Front;
         case .All;      return .None; // I have no idea what cull all is supposed to do
@@ -701,7 +865,7 @@ convert_cull :: (cull: Cull) -> MTLCullMode {
 }
 
 convert_topology_to_primitive :: (topology: Topology) -> MTLPrimitiveType {
-    if topology == {
+    if #complete topology == {
         case .None;             assert(false); return .Triangle;
         case .Triangle;         return .Triangle;
         case .Line;             return .Line;
@@ -710,8 +874,9 @@ convert_topology_to_primitive :: (topology: Topology) -> MTLPrimitiveType {
         case; assert(false); return .Triangle;
     };
 }
+
 convert_primitive_topology :: (topology: Topology) -> MTLPrimitiveTopologyClass {
-if topology == {
+if #complete topology == {
         case .None;             return .Unspecified;
         case .Point;            return .Point;
         case .Line;             return .Line;
@@ -721,43 +886,199 @@ if topology == {
     }
 }
 
-/* OPTIMIZE: This is slow and NOT how you run a queue
-    I should just make it a ringbuffer, but I don't know how many allocators I need */
-get_command_allocator_from_pool :: () -> *MTL4CommandAllocator {
-    allocator: *MTL4CommandAllocator;
-    if command_allocators.count > 0 {
-        allocator = command_allocators[0];
-        array_ordered_remove_by_index(*command_allocators, 0);
-        reset(allocator);
-        //log("got allocator % from pool", allocator);
-    } else {
-        allocator = newCommandAllocator(the_device);
-        //log("allocated new command allocator: %", allocator);
+convert_pixel_format :: (format: Format) -> MTLPixelFormat {
+    if #complete format == {
+	    case .None; return .Invalid; 
+	    case .A8Unorm; return .A8Unorm; 
+	    case .R8Unorm; return .R8Unorm; 
+	    case .R8Unorm_sRGB; return .R8Unorm_sRGB; 
+	    case .R8Snorm; return .R8Snorm; 
+	    case .R8Uint; return .R8Uint; 
+	    case .R8Sint; return .R8Sint; 
+	    case .R16Unorm; return .R16Unorm; 
+	    case .R16Snorm; return .R16Snorm; 
+	    case .R16Uint; return .R16Uint; 
+	    case .R16Sint; return .R16Sint; 
+	    case .R16Float; return .R16Float; 
+	    case .RG8Unorm; return .RG8Unorm; 
+	    case .RG8Unorm_sRGB; return .RG8Unorm_sRGB; 
+	    case .RG8Snorm; return .RG8Snorm; 
+	    case .RG8Uint; return .RG8Uint; 
+	    case .RG8Sint; return .RG8Sint; 
+	    case .B5G6R5Unorm; return .B5G6R5Unorm; 
+	    case .A1BGR5Unorm; return .A1BGR5Unorm; 
+	    case .ABGR4Unorm; return .ABGR4Unorm; 
+	    case .BGR5A1Unorm; return .BGR5A1Unorm; 
+	    case .R32Uint; return .R32Uint; 
+	    case .R32Sint; return .R32Sint; 
+	    case .R32Float; return .R32Float; 
+	    case .RG16Unorm; return .RG16Unorm; 
+	    case .RG16Snorm; return .RG16Snorm; 
+	    case .RG16Uint; return .RG16Uint; 
+	    case .RG16Sint; return .RG16Sint; 
+	    case .RG16Float; return .RG16Float; 
+	    case .RGBA8Unorm; return .RGBA8Unorm; 
+	    case .RGBA8Unorm_sRGB; return .RGBA8Unorm_sRGB; 
+	    case .RGBA8Snorm; return .RGBA8Snorm; 
+	    case .RGBA8Uint; return .RGBA8Uint; 
+	    case .RGBA8Sint; return .RGBA8Sint; 
+	    case .BGRA8Unorm; return .BGRA8Unorm; 
+	    case .BGRA8Unorm_sRGB; return .BGRA8Unorm_sRGB; 
+	    case .RGB10A2Unorm; return .RGB10A2Unorm; 
+	    case .RGB10A2Uint; return .RGB10A2Uint; 
+	    case .RG11B10Float; return .RG11B10Float; 
+	    case .RGB9E5Float; return .RGB9E5Float; 
+	    case .BGR10A2Unorm; return .BGR10A2Unorm; 
+	    case .BGR10_XR; return .BGR10_XR; 
+	    case .BGR10_XR_sRGB; return .BGR10_XR_sRGB; 
+	    case .RG32Uint; return .RG32Uint; 
+	    case .RG32Sint; return .RG32Sint; 
+	    case .RG32Float; return .RG32Float; 
+	    case .RGBA16Unorm; return .RGBA16Unorm; 
+	    case .RGBA16Snorm; return .RGBA16Snorm; 
+	    case .RGBA16Uint; return .RGBA16Uint; 
+	    case .RGBA16Sint; return .RGBA16Sint; 
+	    case .RGBA16Float; return .RGBA16Float; 
+	    case .BGRA10_XR; return .BGRA10_XR; 
+	    case .BGRA10_XR_sRGB; return .BGRA10_XR_sRGB; 
+	    case .RGBA32Uint; return .RGBA32Uint; 
+	    case .RGBA32Sint; return .RGBA32Sint; 
+	    case .RGBA32Float; return .RGBA32Float; 
+	    case .BC1_RGBA; return .BC1_RGBA; 
+	    case .BC1_RGBA_sRGB; return .BC1_RGBA_sRGB; 
+	    case .BC2_RGBA; return .BC2_RGBA; 
+	    case .BC2_RGBA_sRGB; return .BC2_RGBA_sRGB; 
+	    case .BC3_RGBA; return .BC3_RGBA; 
+	    case .BC3_RGBA_sRGB; return .BC3_RGBA_sRGB; 
+	    case .BC4_RUnorm; return .BC4_RUnorm; 
+	    case .BC4_RSnorm; return .BC4_RSnorm; 
+	    case .BC5_RGUnorm; return .BC5_RGUnorm; 
+	    case .BC5_RGSnorm; return .BC5_RGSnorm; 
+	    case .BC6H_RGBFloat; return .BC6H_RGBFloat; 
+	    case .BC6H_RGBUfloat; return .BC6H_RGBUfloat; 
+	    case .BC7_RGBAUnorm; return .BC7_RGBAUnorm; 
+	    case .BC7_RGBAUnorm_sRGB; return .BC7_RGBAUnorm_sRGB; 
+	    case .PVRTC_RGB_2BPP; return .PVRTC_RGB_2BPP; 
+	    case .PVRTC_RGB_2BPP_sRGB; return .PVRTC_RGB_2BPP_sRGB; 
+	    case .PVRTC_RGB_4BPP; return .PVRTC_RGB_4BPP; 
+	    case .PVRTC_RGB_4BPP_sRGB; return .PVRTC_RGB_4BPP_sRGB; 
+	    case .PVRTC_RGBA_2BPP; return .PVRTC_RGBA_2BPP; 
+	    case .PVRTC_RGBA_2BPP_sRGB; return .PVRTC_RGBA_2BPP_sRGB; 
+	    case .PVRTC_RGBA_4BPP; return .PVRTC_RGBA_4BPP; 
+	    case .PVRTC_RGBA_4BPP_sRGB; return .PVRTC_RGBA_4BPP_sRGB; 
+	    case .EAC_R11Unorm; return .EAC_R11Unorm; 
+	    case .EAC_R11Snorm; return .EAC_R11Snorm; 
+	    case .EAC_RG11Unorm; return .EAC_RG11Unorm; 
+	    case .EAC_RG11Snorm; return .EAC_RG11Snorm; 
+	    case .EAC_RGBA8; return .EAC_RGBA8; 
+	    case .EAC_RGBA8_sRGB; return .EAC_RGBA8_sRGB; 
+	    case .ETC2_RGB8; return .ETC2_RGB8; 
+	    case .ETC2_RGB8_sRGB; return .ETC2_RGB8_sRGB; 
+	    case .ETC2_RGB8A1; return .ETC2_RGB8A1; 
+	    case .ETC2_RGB8A1_sRGB; return .ETC2_RGB8A1_sRGB; 
+	    case .ASTC_4x4_sRGB; return .ASTC_4x4_sRGB; 
+	    case .ASTC_5x4_sRGB; return .ASTC_5x4_sRGB; 
+	    case .ASTC_5x5_sRGB; return .ASTC_5x5_sRGB; 
+	    case .ASTC_6x5_sRGB; return .ASTC_6x5_sRGB; 
+	    case .ASTC_6x6_sRGB; return .ASTC_6x6_sRGB; 
+	    case .ASTC_8x5_sRGB; return .ASTC_8x5_sRGB; 
+	    case .ASTC_8x6_sRGB; return .ASTC_8x6_sRGB; 
+	    case .ASTC_8x8_sRGB; return .ASTC_8x8_sRGB; 
+	    case .ASTC_10x5_sRGB; return .ASTC_10x5_sRGB; 
+	    case .ASTC_10x6_sRGB; return .ASTC_10x6_sRGB; 
+	    case .ASTC_10x8_sRGB; return .ASTC_10x8_sRGB; 
+	    case .ASTC_10x10_sRGB; return .ASTC_10x10_sRGB; 
+	    case .ASTC_12x10_sRGB; return .ASTC_12x10_sRGB; 
+	    case .ASTC_12x12_sRGB; return .ASTC_12x12_sRGB; 
+	    case .ASTC_4x4_LDR; return .ASTC_4x4_LDR; 
+	    case .ASTC_5x4_LDR; return .ASTC_5x4_LDR; 
+	    case .ASTC_5x5_LDR; return .ASTC_5x5_LDR; 
+	    case .ASTC_6x5_LDR; return .ASTC_6x5_LDR; 
+	    case .ASTC_6x6_LDR; return .ASTC_6x6_LDR; 
+	    case .ASTC_8x5_LDR; return .ASTC_8x5_LDR; 
+	    case .ASTC_8x6_LDR; return .ASTC_8x6_LDR; 
+	    case .ASTC_8x8_LDR; return .ASTC_8x8_LDR; 
+	    case .ASTC_10x5_LDR; return .ASTC_10x5_LDR; 
+	    case .ASTC_10x6_LDR; return .ASTC_10x6_LDR; 
+	    case .ASTC_10x8_LDR; return .ASTC_10x8_LDR; 
+	    case .ASTC_10x10_LDR; return .ASTC_10x10_LDR; 
+	    case .ASTC_12x10_LDR; return .ASTC_12x10_LDR; 
+	    case .ASTC_12x12_LDR; return .ASTC_12x12_LDR; 
+	    case .ASTC_4x4_HDR; return .ASTC_4x4_HDR; 
+	    case .ASTC_5x4_HDR; return .ASTC_5x4_HDR; 
+	    case .ASTC_5x5_HDR; return .ASTC_5x5_HDR; 
+	    case .ASTC_6x5_HDR; return .ASTC_6x5_HDR; 
+	    case .ASTC_6x6_HDR; return .ASTC_6x6_HDR; 
+	    case .ASTC_8x5_HDR; return .ASTC_8x5_HDR; 
+	    case .ASTC_8x6_HDR; return .ASTC_8x6_HDR; 
+	    case .ASTC_8x8_HDR; return .ASTC_8x8_HDR; 
+	    case .ASTC_10x5_HDR; return .ASTC_10x5_HDR; 
+	    case .ASTC_10x6_HDR; return .ASTC_10x6_HDR; 
+	    case .ASTC_10x8_HDR; return .ASTC_10x8_HDR; 
+	    case .ASTC_10x10_HDR; return .ASTC_10x10_HDR; 
+	    case .ASTC_12x10_HDR; return .ASTC_12x10_HDR; 
+	    case .ASTC_12x12_HDR; return .ASTC_12x12_HDR; 
+	    case .GBGR422; return .GBGR422; 
+	    case .BGRG422; return .BGRG422; 
+	    case .Depth16Unorm; return .Depth16Unorm; 
+	    case .Depth32Float; return .Depth32Float; 
+	    case .Stencil8; return .Stencil8; 
+	    case .Depth24Unorm_Stencil8; return .Depth24Unorm_Stencil8; 
+	    case .Depth32Float_Stencil8; return .Depth32Float_Stencil8; 
+	    case .X32_Stencil8; return .X32_Stencil8; 
+	    case .X24_Stencil8; return .X24_Stencil8; 
+	    case .Unspecificied; return .Unspecialized; 
     }
-    return allocator;
 }
 
-return_command_allocator_to_pool :: (allocator: *MTL4CommandAllocator) { 
-    array_add(*command_allocators, allocator); 
-    //log("returned command allocator % to pool. count is now: %", allocator, command_allocators.count);
+// NOTE: This could just be a straight cast, but I don't 
+convert_write_mask :: (write_mask: WriteMask) -> MTLColorWriteMask {
+    mtl_write_mask : MTLColorWriteMask;
+
+    if write_mask.R  mtl_write_mask |= .Red;
+    if write_mask.G  mtl_write_mask |= .Green;
+    if write_mask.B  mtl_write_mask |= .Blue;
+    if write_mask.A  mtl_write_mask |= .Alpha;
+
+    return mtl_write_mask;
 }
 
-get_command_buffer_from_pool :: () -> *MTL4CommandBuffer {
-    buffer : *MTL4CommandBuffer;
-    if command_buffers.count > 0 {
-        last_index := command_buffers.count -1;
-        buffer = command_buffers[last_index];
-        array_ordered_remove_by_index(*command_buffers, last_index);
-    } else {
-        buffer = objc_new(MTL4CommandBuffer);
+get_command_buffer :: () -> CommandBuffer {
+    init_cb: CommandBuffer;
+    timeline_value := value_semaphore(timeline_semaphore);
+
+    // NOTE: command_buffer_pool is a fixed size array so this is fine
+    for * command_buffer_pool { 
+        if !it.buffer && !init_cb {
+            init_cb = it;
+        }
+
+        if it.buffer && it.frame_used <= timeline_value {
+            reset(it.allocator);
+            // TODO: we could probably do some resetting of the argument tables
+            // to ensure that draw calls are actually binding the values they should
+            return it;
+        }
     }
-    return buffer;
+
+    assert(init_cb != null, "All command buffers are in use!");
+    
+    init_cb.* = .{
+        buffer = newCommandBuffer(the_device),
+        allocator = newCommandAllocator(the_device),
+        vertex_argument_table = create_argument_table(render_arg_table_descriptor),
+        pixel_argument_table = create_argument_table(render_arg_table_descriptor), // same for vertex and pixel stages right now
+        compute_argument_table = create_argument_table(compute_arg_table_descriptor),
+    };
+
+    assert(init_cb.buffer != null, "failed to assign properly");
+
+    return init_cb;
 }
 
-return_command_buffer_to_pool :: (command_buffer: *MTL4CommandBuffer) { array_add(*command_buffers, command_buffer); }
-
-// TODO: I think we can bake the first argument 
-get_argument_table_from_pool :: (pool : *[..]*MTL4ArgumentTable, descriptor: *MTL4ArgumentTableDescriptor) -> *MTL4ArgumentTable {
+create_argument_table :: (descriptor: *MTL4ArgumentTableDescriptor) -> *MTL4ArgumentTable {
+    // TODO: it'd be nice it MTL.jai just generated an overload for procedures that took 
+    // an **NSError to do this, instead of having to follow this pattern everywhere
     error: *NSError;
     argument_table := newArgumentTable(the_device, descriptor, *error);
     if !argument_table  log_error("Problem creating argument table %", error);
@@ -765,31 +1086,15 @@ get_argument_table_from_pool :: (pool : *[..]*MTL4ArgumentTable, descriptor: *MT
     return argument_table;
 }
 
-return_to_pool :: (pool: *[..]$T, pool_member: T) {
-    array_add(pool, pool_member);
-}
-
-get_vertex_argument_table :: () -> *MTL4ArgumentTable { return get_argument_table_from_pool(*vertex_argument_tables, render_arg_table_descriptor); }
-
-// WARNING: for some reason this trashes the memory of the pipeline variable in main.jai
-return_vertex_argument_table_to_pool :: (argument_table: *MTL4ArgumentTable) { 
-    return_to_pool(*vertex_argument_tables, argument_table); 
-}
-
-get_pixel_argument_table :: () -> *MTL4ArgumentTable { return get_argument_table_from_pool(*pixel_argument_tables, render_arg_table_descriptor);}
-return_pixel_argument_table_to_pool :: (argument_table: *MTL4ArgumentTable) { return_to_pool(*pixel_argument_tables, argument_table); }
-
-get_compute_argument_table :: () -> *MTL4ArgumentTable { return get_argument_table_from_pool(*compute_argument_tables, compute_arg_table_descriptor); }
-return_compute_argument_table_to_pool :: (argument_table: *MTL4ArgumentTable) { return_to_pool(*compute_argument_tables, argument_table); }
-
-/* from <dispatch/dispatch.h>
+// TODO: It'd be nice if MTL.jai just overloaded a function that took dispatch_data_t
+// with a version that took an array and followed the pattern below
+/* NOTE: from <dispatch/dispatch.h>
 dispatch_data_t
 dispatch_data_create(const void *buffer,
 	size_t size,
 	dispatch_queue_t _Nullable queue,
 	dispatch_block_t _Nullable destructor);*/
 dispatch_data_create :: (buffer: *void, size: u64, queue: dispatch_queue_t, block: dispatch_block_t) -> dispatch_data_t #foreign libSystem;
-
 
 make_metal_lib :: (slang_ir: []u8) -> *MTLLibrary {
     compiled, metal_lib_data := compile_slang_ir_to_platform(slang_ir, debug_symbols = true);
@@ -803,8 +1108,6 @@ make_metal_lib :: (slang_ir: []u8) -> *MTLLibrary {
 
     return metal_lib;
 }
-
-
 
 make_metal_function :: (slang_ir: []u8) -> *MTLFunction {
     metal_lib := make_metal_lib(slang_ir);
@@ -844,8 +1147,11 @@ the_swapchain : *CAMetalLayer;
 the_device : *MTLDevice;
 arc_pool: *NSAutoreleasePool;
 allocations: Table(*void, *MTLBuffer);
-command_allocators: [..]*MTL4CommandAllocator;
-command_buffers: [..]*MTL4CommandBuffer;
+command_buffer_pool  : [COMMAND_BUFFER_POOL_SIZE]CommandBuffer_;
+frame_counter : u64;
+timeline_semaphore : Semaphore; 
+
+COMMAND_BUFFER_POOL_SIZE :: 100;
 
 
 /* WARNING: resizes of these arrays for some reason trash memory elsewhere.
@@ -887,8 +1193,6 @@ draw_call_assertions :: #string END
     assert(command_buffer.active_pipeline.kind == .Graphics || command_buffer.active_pipeline.kind == .GraphicsMeshlet, "active pipeline kind is not graphics or graphics_meshlet!");
     assert(command_buffer.active_encoder_kind == .Render);
 END
-
-
 
 #import "shader_compiler";
 

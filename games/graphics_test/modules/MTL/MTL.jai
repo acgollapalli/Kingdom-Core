@@ -10447,7 +10447,7 @@ useResidencySets :: (self: *MTLCommandBuffer, residencySets: **MTLResidencySet, 
 }
 
 
-CAMetalLayer :: struct { using calayer: CALayer; _priv: *_CAMetalLayerPrivate; }
+CAMetalLayer :: struct { using #as calayer: CALayer; _priv: *_CAMetalLayerPrivate; }
  _CAMetalLayerPrivate :: struct {}
 layer :: (self: *CAMetalLayer) -> *CAMetalLayer {
 	#insert #run METHOD_BODY(__selectors.layer, #type (self: *CAMetalLayer) -> *CAMetalLayer);
@@ -10897,7 +10897,7 @@ CGColorSpaceRef :: *void;
 
 
 // borrowed from the code that ships with the compiler
-MTLCreateSystemDefaultDevice :: () -> id #foreign Metal;
+MTLCreateSystemDefaultDevice :: () -> *MTLDevice #foreign Metal;
 MTLCopyAllDevices :: () -> *NSArray(id) #foreign Metal;
 MTLDeviceNotificationName :: *NSString;
 MTLDeviceWasAddedNotification: MTLDeviceNotificationName;

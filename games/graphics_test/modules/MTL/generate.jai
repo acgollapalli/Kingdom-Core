@@ -281,7 +281,7 @@ build_struct_declaration :: (class: Class) -> string {
     } else {
         declaration = tprint("% :: struct {}\n", class.name);
     }
-    if class.name == "CAMetalLayer" declaration = "CAMetalLayer :: struct { using calayer: CALayer; _priv: *_CAMetalLayerPrivate; }\n _CAMetalLayerPrivate :: struct {}\n";
+    if class.name == "CAMetalLayer" declaration = "CAMetalLayer :: struct { using #as calayer: CALayer; _priv: *_CAMetalLayerPrivate; }\n _CAMetalLayerPrivate :: struct {}\n";
 
     return declaration;
 }
@@ -770,7 +770,7 @@ CGColorSpaceRef :: *void;
 
 
 // borrowed from the code that ships with the compiler
-MTLCreateSystemDefaultDevice :: () -> id #foreign Metal;
+MTLCreateSystemDefaultDevice :: () -> *MTLDevice #foreign Metal;
 MTLCopyAllDevices :: () -> *NSArray(id) #foreign Metal;
 MTLDeviceNotificationName :: *NSString;
 MTLDeviceWasAddedNotification: MTLDeviceNotificationName;
